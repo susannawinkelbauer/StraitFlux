@@ -14,7 +14,7 @@ To use all functions and improve the performance also add `matplotlib=3.6.2` and
 Activate your environment and start calculations.
 
 # Usage and testing
-`Examples.ipynb` contains some easy examples to get started with the calculations. Additionally the Folder `Data\` contains files needed for those calculations.
+`Examples.ipynb` contains some easy examples to get started with the calculations. Data files used in the notebook may be downloaded via ESGF (https://esgf-node.llnl.gov/search/cmip6/).
 
 
 # Attribution
