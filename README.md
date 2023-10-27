@@ -3,6 +3,7 @@
 Tools for easy and precise computations of **oceanic transports of volume, heat, salinity and ice**, as well as **crosssections** of the vertical plane of **currents, temperature and salinity**. StraitFlux works on various curvilinear modelling grids (+ regular grids), independant of the exact curvature, the number of poles and the used Arakawa partition. More information may be found in Winkelbauer et al. (2023).
 
 # Key Publications
+Winkelbauer, S., Mayer, and Haimberger, L.: StraitFlux - Precise computations of Water Strait fluxes on various Modelling Grids. In preperation.
 
 # Requiremnets and Installation
 StraitFlux is written in Python and requires at least version 3.8. It is currently run and tested in 3.11.6.
@@ -18,5 +19,7 @@ Activate your environment and start calculations.
 
 
 # Attribution
+If you use the code please cite Winkelbauer et al. (2023, see above).
 
 # License
+StraitFlux is a free software and can be redistributed and/or modified under the terms of the GNU General Public License version 3 as published by the Free Software Foundation.
