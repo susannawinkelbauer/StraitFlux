@@ -8,9 +8,17 @@ Winkelbauer, S., Mayer, and Haimberger, L.: StraitFlux - Precise computations of
 # Requiremnets and Installation
 StraitFlux is written in Python and requires at least version 3.8. It is currently run and tested in 3.11.6.
 
-To install all required packages run:
-`conda create -n StraitFlux python=3.11.6 xarray=2022.12.0 netcdf4 xesmf=0.7.0 xmip=0.6.1 tqdm` <br>
-To use all functions and improve the performance also add `matplotlib=3.6.2` and `dask=2022.12.1`
+The following package have to be installed:<br>
+`xarray=2022.12.0`<br>
+`netcdf4`<br>
+`xesmf=0.7.0`<br>
+`xmip=0.6.1`<br>
+`tqdm`<br>
+To use all functions and improve the performance also add:<br>
+`matplotlib=3.6.2`<br>
+`dask=2022.12.1`<br>
+
+you may e.g. run: `conda create -n StraitFlux python=3.11.6 xarray=2022.12.0 netcdf4 xesmf=0.7.0 xmip=0.6.1 tqdm` <br>
 
 Activate your environment and start calculations.
 
