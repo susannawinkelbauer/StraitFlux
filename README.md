@@ -9,19 +9,19 @@ Tools for easy and precise computations of **oceanic transports of volume, heat,
 Winkelbauer, S., Mayer, and Haimberger, L.: StraitFlux - Precise computations of Water Strait fluxes on various Modelling Grids. In preperation.
 
 # Requiremnets and Installation
-StraitFlux is written in Python and requires at least version 3.8. It is currently run and tested in 3.11.6.
+StraitFlux is written in Python and requires python >=3.10. It was tested on Python 3.10.13 and 3.11.6.
 
 The following package have to be installed:<br>
-`xarray=2022.12.0`<br>
+`xarray`<br>
 `netcdf4`<br>
-`xesmf=0.7.0`<br>
-`xmip=0.6.1`<br>
+`xesmf`<br>
+`xmip`<br>
 `tqdm`<br>
 To use all functions and improve the performance also add:<br>
-`matplotlib=3.6.2`<br>
-`dask=2022.12.1`<br>
+`matplotlib`<br>
+`dask`<br>
 
-you may e.g. run: `conda create -n StraitFlux python=3.11.6 xarray=2022.12.0 netcdf4 xesmf=0.7.0 xmip=0.6.1 tqdm` <br>
+you may e.g. run: `conda create -n StraitFlux python=3.11.6 xarray netcdf4 xesmf xmip tqdm matplotlib dask` <br>
 
 Activate your environment and start calculations.
 
