@@ -154,6 +154,8 @@ def check_indices(indices,out_u,out_v,t,u,v,strait,model,path_save):
     except NameError:
         print('skipping Plot')
 
+def interp_TS(ds,d):
+    return ds.rolling({d:2},min_periods=1).mean()
 
 def calc_dz_faces(deltaz,grid,model,path_mesh):
 
