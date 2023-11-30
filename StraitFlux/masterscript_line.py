@@ -241,8 +241,8 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
 
     if product == 'heat':
         print('rolling T')
-        Tudata = Tdata.thetao.rolling(x=2,min_periods=1).mean()
-        Tvdata = Tdata.thetao.rolling(y=2,min_periods=1).mean()
+        Tudata = func.interp_TS(Tdata.thetao,'x')
+        Tvdata = func.interp_TS(Tdata.thetao,'y')
         print('calc u')
         udata=udata*mu2.dyu.values*dzu3.values*(Tudata.values-Tref)
         print('calc v')
@@ -252,8 +252,8 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
 
     if product == 'salt':
         print('rolling S')
-        Sudata = Sdata.so.rolling(x=2,min_periods=1).mean()
-        Svdata = Sdata.so.rolling(y=2,min_periods=1).mean()
+        Sudata = func.interp_TS(Sdata.so,'x')
+        Svdata = func.interp_TS(Sdata.so,'y')
         print('calc u')
         udata=udata*mu2.dyu.values*dzu3.values*Sudata.values
         print('calc v')
@@ -285,8 +285,8 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     pointsv = np.zeros(datav.inte.shape)
     data1v = datav.inte
 
-    indi1=indices.indices[:,2][indices.indices[:,3]!=0]#[1:]
-    indi2=indices.indices[:,3][indices.indices[:,3]!=0]#[1:]
+    indi1=indices.indices[:,2][indices.indices[:,3]!=0]
+    indi2=indices.indices[:,3][indices.indices[:,3]!=0]
 
     for m in range(len(indi1)-1):
         pointsv[:,int(indi2[m]-min_y+1),int(indi1[m]-min_x+1)] = data1v[:,int(indi2[m]-min_y+1),int(indi1[m]-min_x+1)] * sign_v[m]
