@@ -315,9 +315,12 @@ def TS_interp(product,strait,model,time_start,time_end,file_u,file_t,file_s='',c
         start = time.time()
         indices,ref_line=check_availability_indices(T_data,strait,model,coords,lon_p,lat_p,set_latlon)
         T_proj_points,dist_listT,dist_listT_kurz2=func2.calc_interpolation_points(indices,T_data, ref_line)
+        
+        if saving == True:
+            np.savetxt(path_save+'dx_'+model+strait+'.txt', dist_listT_kurz2)
+            T_proj_points.to_netcdf(path_save+'T_proj_points_'+model+strait+'.nc')
     
-    
-    #sys.exit()
+
     print('read t and/or s fields')
     partial_func = partial(prepro._preprocess2,lon_bnds=(int(min_x)-5,int(max_x)+5),lat_bnds=(int(min_y)-5,int(max_y)+5))
     if product == 'T':
