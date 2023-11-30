@@ -98,14 +98,20 @@ def corr_lonlat_dims(ds):
         ds['lat']=ds.lat[0]
     return ds
 
-def rename_time(ds):
-    if 'time_counter' in ds:
-        ds=ds.rename({'time_counter':'time'})
+def rename_time_lev(ds):
+    rename_dict = {
+        "lev": ["deptht", "olevel", "zlev", "olev", "depth","depthu","depthv","ncl1"],
+        "time": ["time_counter"],
+    }
+    for i in ds.coords:
+        for target, candidates in rename_dict.items():
+            if i in candidates:
+                ds = ds.rename({i: target})
     return ds
 
 def wrapper(ds):
     ds = ds.copy()
-    ds = rename_time(ds)
+    ds = rename_time_lev(ds)
     ds = rename_cmip6(ds,rename_dict=renaming_dict_exp())
     ds = promote_empty_dims(ds)
     ds = broadcast_lonlat(ds)
@@ -175,7 +181,7 @@ def _preprocess1(x):
     x=wrapper(x)
     return x.isel(lev=0)
 
-## for actuall felder
+## for actuall fields
 def _preprocess2(x, lon_bnds, lat_bnds):
     x=wrapper(x)
     return x.sel(x=slice(*lon_bnds), y=slice(*lat_bnds))
