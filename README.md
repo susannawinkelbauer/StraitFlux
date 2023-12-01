@@ -11,7 +11,7 @@ Winkelbauer, S., Mayer, and Haimberger, L.: StraitFlux - Precise computations of
 # Requiremnets and Installation
 StraitFlux is written in Python and requires python >=3.10. It was tested on Python 3.10.13 and 3.11.6.
 
-The following package have to be installed:<br>
+The following packages have to be installed:<br>
 `xarray`<br>
 `netcdf4`<br>
 `xesmf`<br>
