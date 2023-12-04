@@ -21,15 +21,13 @@ To use all functions and improve the performance also add:<br>
 `matplotlib`<br>
 `dask`<br>
 
-you may e.g. run: `conda create -n StraitFlux python=3.11.6 xarray netcdf4 xesmf xmip tqdm matplotlib dask` <br>
-
-Activate your environment and start calculations.
-
-Alternatively you may download StraitFlux via pypi by running `pip install StraitFlux`. <br>
-**If you run into problems with the `xesmf` regridder try installing `xesmf` via conda prior to the StraitFlux installation!**, e.g.:<br>
+You may download StraitFlux via pypi by running `pip install StraitFlux`. <br>
+**Note that ESMpy is not available via pypi and has to be installed prior to StraitFlux using conda!**, you may run for instance:<br>
 `conda create -n ENVNAME python=3.11.6 xesmf`<br>
 `conda activate ENVNAME`<br>
 `pip install StraitFlux`<br>
+
+Alternatively ou may download all needed packages by e.g. running: `conda create -n StraitFlux python=3.11.6 xarray netcdf4 xesmf xmip tqdm matplotlib dask` <br>
 
 # Usage and testing
 `Examples.ipynb` contains some easy examples to get started with the calculations. Data files used in the notebook may be downloaded via ESGF (https://esgf-node.llnl.gov/search/cmip6/).
