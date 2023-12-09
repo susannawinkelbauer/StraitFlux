@@ -16,10 +16,10 @@ except ImportError:
     print('skipping dask import')
 
 from xmip.preprocessing import rename_cmip6, promote_empty_dims, broadcast_lonlat, correct_coordinates
-import preprocessing as prepro
-import functions as func
-import functions_VP as func2
-from indices import check_availability_indices, prepare_indices
+import StraitFlux.preprocessing as prepro
+import StraitFlux.functions as func
+import StraitFlux.functions_VP as func2
+from StraitFlux.indices import check_availability_indices, prepare_indices
 
 def vel_projection(strait,model,time_start,time_end,file_u,file_v,file_t,file_z,coords=0,set_latlon=False,lat_p=0,lon_p=0,path_save='',path_indices='',path_mesh='',Arakawa='',saving=True):
     '''
