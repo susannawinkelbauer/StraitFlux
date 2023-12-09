@@ -10,7 +10,7 @@ try:
     from dask.diagnostics import ProgressBar
 except ImportError:
     print('skipping dask import')
-from indices import check_availability_indices, prepare_indices
+from StraitFlux.indices import check_availability_indices, prepare_indices
 
 def check_Arakawa(u_data,v_data,T_data,product,model):
 
