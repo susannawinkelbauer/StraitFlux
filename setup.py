@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name = 'StraitFlux',
     packages = ['StraitFlux'],
-    version = '1.0.1',
+    version = '1.0.2',
     install_requires=['xarray', 'netcdf4', 'xesmf', 'xmip', 'tqdm', 'matplotlib', 'dask'], #external packages as dependencies
     python_requires=">=3.10",
     description = 'StraitFlux',
