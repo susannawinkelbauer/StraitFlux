@@ -7,8 +7,8 @@ except ImportError:
 from tqdm import tqdm
 import sys
 from dask.diagnostics import ProgressBar
-from indices import check_availability_indices, prepare_indices
-import preprocessing as prepro
+from StraitFlux.indices import check_availability_indices, prepare_indices
+import StraitFlux.preprocessing as prepro
 
 def select_indices(indices,u_data,v_data,T_data):
     '''
