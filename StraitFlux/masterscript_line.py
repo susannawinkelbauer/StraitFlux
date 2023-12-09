@@ -15,9 +15,9 @@ except ImportError:
     print('skipping dask import')
 
 from xmip.preprocessing import rename_cmip6, promote_empty_dims, broadcast_lonlat, correct_coordinates
-import preprocessing as prepro
-import functions as func
-from indices import check_availability_indices, prepare_indices
+import StraitFlux.preprocessing as prepro
+import StraitFlux.functions as func
+from StraitFlux.indices import check_availability_indices, prepare_indices
 
 
 
