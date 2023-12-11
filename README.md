@@ -8,7 +8,7 @@ Tools for easy and precise computations of **oceanic transports of volume, heat,
 # Key Publications
 Winkelbauer, S., Mayer, and Haimberger, L.: StraitFlux - Precise computations of Water Strait fluxes on various Modelling Grids. (in review)
 
-# Requiremnets and Installation
+# Requirements and Installation
 StraitFlux is written in Python and requires python >=3.10. It was tested on Python 3.10.13 and 3.11.6.
 
 The following packages have to be installed:<br>
@@ -30,7 +30,7 @@ You may download StraitFlux via pypi by running `pip install StraitFlux`. <br>
 Alternatively ou may download all needed packages by e.g. running: `conda create -n StraitFlux python=3.11.6 xarray netcdf4 xesmf xmip tqdm matplotlib dask` <br>
 
 # Usage and testing
-`Examples.ipynb` contains some easy examples to get started with the calculations. Data files used in the notebook may be downloaded via ESGF (https://esgf-node.llnl.gov/search/cmip6/).
+`Examples.ipynb` contains some easy examples to get started with the calculations (written fro a UNIX-environment). Data files used in the notebook may be downloaded via ESGF (https://esgf-node.llnl.gov/search/cmip6/).
 
 
 # Attribution
