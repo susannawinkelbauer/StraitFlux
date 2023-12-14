@@ -2,7 +2,6 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 # StraitFlux
-
 Tools for easy and precise computations of **oceanic transports of volume, heat, salinity and ice**, as well as **crosssections** of the vertical plane of **currents, temperature and salinity**. StraitFlux works on various curvilinear modelling grids (+ regular grids), independant of the exact curvature, the number of poles and the used Arakawa partition. More information may be found in Winkelbauer et al. (2023).
 
 # Key Publications
@@ -30,7 +29,8 @@ You may download StraitFlux via pypi by running `pip install StraitFlux`. <br>
 Alternatively ou may download all needed packages by e.g. running: `conda create -n StraitFlux python=3.11.6 xarray netcdf4 xesmf xmip tqdm matplotlib dask` <br>
 
 # Usage and testing
-`Examples.ipynb` contains some easy examples to get started with the calculations (written fro a UNIX-environment). Data files used in the notebook may be downloaded via ESGF (https://esgf-node.llnl.gov/search/cmip6/).
+`Examples.ipynb` contains some easy examples to get started with the calculations (written fro a UNIX-environment). <br>
+Data files used in the notebook may be downloaded using `Download.ipynb` via ESGF (https://esgf-node.llnl.gov/search/cmip6/) for CMIP6 and the Mercator Ocean OpenDAP system for reanalyses.
 
 
 # Attribution
