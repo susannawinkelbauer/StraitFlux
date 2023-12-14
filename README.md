@@ -30,7 +30,7 @@ Alternatively ou may download all needed packages by e.g. running: `conda create
 
 # Usage and testing
 `Examples.ipynb` contains some easy examples to get started with the calculations (written fro a UNIX-environment). <br>
-Data files used in the notebook may be downloaded using `Download.ipynb` via ESGF (https://esgf-node.llnl.gov/search/cmip6/) for CMIP6 and the Mercator Ocean OpenDAP system for reanalyses.
+Data files used in the notebook may be downloaded using `Download.ipynb` via ESGF (https://esgf-node.llnl.gov/search/cmip6/) for CMIP6 and the Mercator Ocean OpenDAP system for reanalyses. You'll need about 3.7GB for the used CanESM5 files and about 16GB for the used reanalyses files.
 
 
 # Attribution
