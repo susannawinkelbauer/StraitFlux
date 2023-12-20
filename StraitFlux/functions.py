@@ -12,7 +12,7 @@ except ImportError:
     print('skipping dask import')
 from StraitFlux.indices import check_availability_indices, prepare_indices
 
-def check_Arakawa(u_data,v_data,T_data,product,model):
+def check_Arakawa(u_data,v_data,T_data,model):
 
     u=u_data
     v=v_data
