@@ -102,7 +102,7 @@ def vel_projection(strait,model,time_start,time_end,file_u,file_v,file_t,file_z,
                 ti=ti.load()
                 ui=ui.load()
                 vi=vi.load()
-            grid = func.check_Arakawa(ui,vi,ti,product,model)
+            grid = func.check_Arakawa(ui,vi,ti,model)
             with open(path_mesh+model+'grid.txt', 'w') as f:
                 f.write(grid)
     else:
