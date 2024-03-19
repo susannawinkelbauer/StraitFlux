@@ -3,46 +3,54 @@ import xarray as xa
 import numpy as np
 import sys
 
+def check_res(Tdataset):
+    if np.abs(Tdataset.lon.min()-Tdataset.lon.max()) >= 358:
+        res=360/len(Tdataset.x)*0.4
+    else:
+        res=(Tdataset.lon[0,1].values-Tdataset.lon[0,0].values)*0.4
+    print(res)
+    return res
 
-def def_indices(strait,coords,lon_p,lat_p,set_latlon):
+
+def def_indices(strait,coords,lon_p,lat_p,set_latlon,res):
     if set_latlon == True:
         lon = lon_p
         lat = lat_p
     elif coords!=0:
         if np.abs(coords[2]-coords[0]) <= np.abs(coords[3]-coords[1]):
-            lon = np.array(np.arange(coords[1],coords[3],0.1))
+            lon = np.array(np.arange(coords[1],coords[3],res))
             lat = np.array(np.linspace(coords[0],coords[2],len(lon)))
         else:
-            lat = np.array(np.arange(coords[0],coords[2],0.1))
+            lat = np.array(np.arange(coords[0],coords[2],res))
             lon = np.array(np.linspace(coords[1],coords[3],len(lat)))
     elif strait == 'Bering':
-        lon = np.array(np.arange(-170.5,-166,0.1))
+        lon = np.array(np.arange(-170.5,-166,res))
         lat = np.array(np.linspace(65.99,65.75,len(lon)))
     elif strait == 'Fram':
-        lon = np.array(np.arange(-20.7,12,0.1))
+        lon = np.array(np.arange(-20.7,12,res))
         lat = np.array(np.linspace(78.82,78.836,len(lon)))
     elif strait == 'Davis':
-        lon = np.array(np.arange(-61.8,-52.5,0.1))
+        lon = np.array(np.arange(-61.8,-52.5,res))
         lat = np.array(np.linspace(66.65,67.31,len(lon)))
     elif strait == 'Barents':
-        lat = np.array(np.arange(78,69.2,-0.1))
+        lat = np.array(np.arange(78,69.2,-res))
         lon = np.array(np.linspace(18,19.8,len(lat)))
     elif strait == 'RAPID':
-        lon = np.array(np.arange(-80.5,-13.5,0.1))
+        lon = np.array(np.arange(-80.5,-13.5,res))
         lat = np.array(np.linspace(26.0,26.0,len(lon)))
     elif strait == 'OSNAP':
-        lon1 = np.array(np.arange(-57,-44.6,0.1))
+        lon1 = np.array(np.arange(-57,-44.6,res))
         lat1 = np.array(np.linspace(52,60.1888,len(lon1)))
-        lon2 = np.array(np.arange(-44.6,-5.5,0.1))
+        lon2 = np.array(np.arange(-44.6,-5.5,res))
         lat2 = np.array(np.linspace(60.1888,56.5,len(lon2)))
         lat = np.append(lat1,lat2)
         lon = np.append(lon1,lon2)
     elif strait == 'GSR':
-        lon1 = np.array(np.arange(-30.8212,-23.2447,0.1))
-        lon2 = np.array(np.arange(-23.2447,-15.0679,0.1))
-        lon3 = np.array(np.arange(-15.0679,-6.8700,0.1))
-        lon4 = np.array(np.arange(-6.8700,-1.1695,0.1))
-        lon5 = np.array(np.arange(-1.1695,6.10547,0.1))
+        lon1 = np.array(np.arange(-30.8212,-23.2447,res))
+        lon2 = np.array(np.arange(-23.2447,-15.0679,res))
+        lon3 = np.array(np.arange(-15.0679,-6.8700,res))
+        lon4 = np.array(np.arange(-6.8700,-1.1695,res))
+        lon5 = np.array(np.arange(-1.1695,6.10547,res))
         lon = []
         lon = np.append(lon,lon1)
         lon = np.append(lon,lon2)
@@ -61,28 +69,28 @@ def def_indices(strait,coords,lon_p,lat_p,set_latlon):
         lat = np.append(lat,lat4)
         lat = np.append(lat,lat5)
     elif strait == 'Makassar':
-        lon = np.array(np.arange(116,119,0.1))
+        lon = np.array(np.arange(116,119,res))
         lat = np.array(np.linspace(-2.87,-2.87,len(lon)))
     elif strait == 'Hudson':
-        lon = np.array(np.arange(-82.832771,-82.59107,0.1))
+        lon = np.array(np.arange(-82.832771,-82.59107,res))
         lat = np.array(np.linspace(69.66432,69.89028,len(lon)))
     elif strait == 'Hudson_NW':
-        lon = np.array(np.arange(-84.500731,-84.317820,0.1))
+        lon = np.array(np.arange(-84.500731,-84.317820,res))
         lat = np.array(np.linspace(69.85032,70.001132,len(lon)))
     elif strait == 'Färöer':
-        lat = np.array(np.arange(62.5,63.875,0.1))
+        lat = np.array(np.arange(62.5,63.875,res))
         lon = np.array(np.linspace(-6.125,-6.125,len(lat)))
     elif strait == 'Gibraltar':
-        lat = np.array(np.arange(34.5,37.5,0.1))
+        lat = np.array(np.arange(34.5,37.5,res))
         lon = np.array(np.linspace(-5.59,-5.59,len(lat)))
     elif strait == 'NIIC':
-        lon = np.array(np.arange(-30.8212,-23.2447,0.1))
+        lon = np.array(np.arange(-30.8212,-23.2447,res))
         lat = np.array(np.linspace(68.5318,66.0050,len(lon)))
     elif strait == 'IF':
-        lon = np.array(np.arange(-15.0679,-6.8700,0.1))
+        lon = np.array(np.arange(-15.0679,-6.8700,res))
         lat = np.array(np.linspace(64.4121,62.0669,len(lon)))
     elif strait == 'FS':
-        lon = np.array(np.arange(-6.8700,-1.1695,0.1))
+        lon = np.array(np.arange(-6.8700,-1.1695,res))
         lat = np.array(np.linspace(62.0669,60.2777,len(lon)))
     else:
         print('strait not defined, please provide coordinates: coords=(lat_start,lon_start,lat_end,lon_end)')
@@ -194,8 +202,8 @@ def select_points(Tdataset,xstart,ystart,lat_line_point,lon_line_point):
 
 def check_availability_indices(Tdataset,strait,model,coords,lon_p,lat_p,set_latlon):
     print('calculating indices...')
-
-    lat,lon = def_indices(strait,coords,lon_p,lat_p,set_latlon)
+    res = check_res(Tdataset)
+    lat,lon = def_indices(strait,coords,lon_p,lat_p,set_latlon,res)
 
 
     line = xa.DataArray(data=1,dims=['lat','lon'],coords=[lat,lon])
@@ -211,13 +219,12 @@ def check_availability_indices(Tdataset,strait,model,coords,lon_p,lat_p,set_latl
             indices[i,1] = ystart
         else:
             xstart,ystart = select_points(Tdataset,xstart,ystart,line.lat[i].values,line.lon[i].values)
-            #print(line.lon[i].values)
-            #print(Tdataset.lon[ystart,xstart].values)
-            # to provide circle:
+            # to provide circle: 
             if xstart == len(Tdataset.x)-1:
-                xstart = 1
-            elif ystart == len(Tdataset.y)-1:
-                ystart = len(Tdataset.y)-3
+                xstart = 0
+            elif ystart == len(Tdataset.y)-1 and indices[i-1,1] == len(Tdataset.y)-1:
+                print('Attention: Strait crossing the northern boundary – make sure correct indices are chosen!')
+                ystart = len(Tdataset.y)-1
                 xstart = len(Tdataset.x)-1-xstart
             indices[i,0] = xstart
             indices[i,1] = ystart
@@ -338,4 +345,5 @@ def prepare_indices(indices):
     out_u_vz = out_u_vz[~masku]
 
     return out_u,out_v,out_u_vz
+
 
