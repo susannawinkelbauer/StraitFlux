@@ -109,6 +109,21 @@ def rename_time_lev(ds):
                 ds = ds.rename({i: target})
     return ds
 
+def drop_cyclic_points(ds):
+    tt,ind=np.unique(ds.lon,axis=1,return_index=True)
+    ds=ds.sel(x=np.sort(ind))
+    return ds
+
+def drop_northsouth_duplicate_points(ds):
+    tt,ind=np.unique(ds.lat,axis=0,return_index=True)
+    ds=ds.sel(y=np.sort(ind))
+    return ds
+
+def drop_cyclic_points(ds):
+    tt,ind=np.unique(ds.lon,axis=1,return_index=True)
+    ds=ds.sel(x=np.sort(ind))
+    return ds
+
 def wrapper(ds):
     ds = ds.copy()
     ds = rename_time_lev(ds)
@@ -123,6 +138,8 @@ def wrapper(ds):
     ds = corr_lonlat_dims(ds)
     ds = corr_updown(ds)
     ds = corr_xy_points(ds)
+    ds = drop_cyclic_points(ds)
+    ds = drop_northsouth_duplicate_points(ds)
     return ds
 
 def distance(lat1,lon1,lat2,lon2):
@@ -216,4 +233,5 @@ def kart_2_kugel(x,y,z):
             lon = np.degrees(np.arctan(y[i]/x[i])) - 180
         lon2=np.append(lon2,lon)
     return lat,lon2
+
 
