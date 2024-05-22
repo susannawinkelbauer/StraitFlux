@@ -165,8 +165,8 @@ def distance(lat1,lon1,lat2,lon2):
 
 def calc_dxdy(model,u,v,path_mesh):
 
-    dx=xa.DataArray(data=np.zeros(u.lat.shape),coords=u.lat.coords,dims=u.lat.dims)
-    dy=xa.DataArray(data=np.zeros(v.lat.shape),coords=v.lat.coords,dims=v.lat.dims)
+    dy=xa.DataArray(data=np.zeros(u.lat.shape),coords=u.lat.coords,dims=u.lat.dims)
+    dx=xa.DataArray(data=np.zeros(v.lat.shape),coords=v.lat.coords,dims=v.lat.dims)
     for i in tqdm(range(0,len(u.y)-1)):
         #print(i)
         dy[i+1,:]=distance(u.lat[i,:],u.lon[i,:],u.lat[i+1,:],u.lon[i+1,:])
@@ -233,5 +233,6 @@ def kart_2_kugel(x,y,z):
             lon = np.degrees(np.arctan(y[i]/x[i])) - 180
         lon2=np.append(lon2,lon)
     return lat,lon2
+
 
 
