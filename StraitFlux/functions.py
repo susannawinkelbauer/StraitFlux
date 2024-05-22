@@ -141,10 +141,9 @@ def check_indices(indices,out_u,out_v,t,u,v,strait,model,path_save):
     t=t.sel(x=slice(int(min_x)-2,int(max_x)+2),y=slice(int(min_y)-2,int(max_y)+2)).load()
     u=u.sel(x=slice(int(min_x)-1,int(max_x)+1),y=slice(int(min_y)-1,int(max_y)+1)).load()
     v=v.sel(x=slice(int(min_x)-1,int(max_x)+1),y=slice(int(min_y)-1,int(max_y)+1)).load()
-    #print(t)
     try:
         plt.title(model+'_'+strait,fontsize=14)
-        u.uo.plot()
+        plt.pcolormesh(t.x,t.y,(t.thetao/t.thetao),cmap='tab20c')
         plt.scatter(out_v[:,0],out_v[:,1]+0.5,marker='_',c='r',s=200)
         plt.scatter(out_u[:,0]+0.5,out_u[:,1],marker='|',c='r',s=200)
         plt.ylabel('y',fontsize=14)
