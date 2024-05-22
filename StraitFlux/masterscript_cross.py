@@ -377,3 +377,9 @@ def TS_interp(product,strait,model,time_start,time_end,file_u,file_t,file_s='',c
         T_tot.to_netcdf(path_save+strait+'_crosssection_S_'+model+'_'+str(time_start)+'-'+str(time_end)+'.nc')
     return T_tot
 
+
+
+def calc_MOC(strait,model,time_start,time_end,file_u,file_v,file_t,file_z,coords=0,set_latlon=False,lat_p=0,lon_p=0,path_save='',path_indices='',path_mesh='',Arakawa='',saving=True):
+    uv=vel_projection(strait,model,time_start,time_end,file_u,file_v,file_t,file_z,coords=0,set_latlon=False,lat_p=0,lon_p=0,path_save='',path_indices='',path_mesh='',Arakawa='',saving=True)
+    MOC=(uv.uv*uv.dx_int*uv.dz_int).sum(axis=2)[:,::-1].cumsum('depth')/-1
+    return MOC
