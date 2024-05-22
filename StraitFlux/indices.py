@@ -346,4 +346,3 @@ def prepare_indices(indices):
 
     return out_u,out_v,out_u_vz
 
-
