@@ -22,7 +22,7 @@ from StraitFlux.indices import check_availability_indices, prepare_indices
 
 
 
-def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,file_z,coords=0,set_latlon=False,lon_p=0,lat_p=0,file_s='',file_sic='',file_sit='',Arakawa='',rho=1026,cp=3996, Tref=0,path_save='',path_indices='',path_mesh='',saving=True):
+def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,file_z,mesh_dxv=0, mesh_dyu=0,coords=0,set_latlon=False,lon_p=0,lat_p=0,file_s='',file_sic='',file_sit='',Arakawa='',rho=1026,cp=3996, Tref=0,path_save='',path_indices='',path_mesh='',saving=True):
 
     '''Calculation of Transports using line integration
 
@@ -32,12 +32,13 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     model (str): desired CMIP6 model or reanalysis
     time_start (str or int): starting year
     time_end (str or int): ending year
-    file_u (str): path + filename(s) of u field(s); use ice velocities (ui) for ice transports; (multiple files possible, use *; must be possible to combine files over time coordinate)
+    file_u (str OR ): path + filename(s) of u field(s); use ice velocities (ui) for ice transports; (multiple files possible, use *; must be possible to combine files over time coordinate)
     file_v (str): path + filename(s) of v field(s); use ice velocities (vi) for ice transports; (multiple files possible, use *)
     file_t (str): path + filename(s) of temperature field(s); (multiple files possible, use *)
     file_z (str): path + filename(s) of cell thickness field(s); (multiple files possible, use *)
 
     OPTIONAL:
+    mesh_dxu/mesh_dyv (array): arrays containing the exact grid cell dimensions at northern and eastern grid cell faces of u and v cells (dxv and dyu); if not supplied will be calculated
     coords (tuple): coordinates for strait, if not pre-defined: (latitude_start,longitude_start,latitude_end,longitude_end)
     set_latlon: set True if you wish to pass arrays of latitudes and longitudes
     lon (array): longitude coordinates for strait, if not pre-defined. (range -180 to 180; same length as lat needed!)
@@ -83,7 +84,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         indices,line = check_availability_indices(ti,strait,model,coords,lon_p,lat_p,set_latlon)
         i2=indices.indices.where(indices.indices!=0)
         try:
-            plt.pcolormesh((ui.uo))
+            plt.pcolormesh((ti.thetao/ti.thetao),cmap='tab20c')
             plt.scatter(i2[:,2],i2[:,3],color='tab:red',s=0.1,marker='x')
             plt.scatter(i2[:,0],i2[:,1],color='tab:red',s=0.1,marker='x')
             plt.title(model+'_'+strait,fontsize=14)
@@ -150,21 +151,27 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc')
         mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc')
     except FileNotFoundError:
-        print('calc horizontal meshes')
-        try:
-            mu,mv = prepro.calc_dxdy(model,ui,vi,path_mesh)
-        except NameError:
-            print('read and load files for mesh')
-            ui = xa.open_mfdataset(file_u, preprocess=partial_func).isel(time=0)
-            vi = xa.open_mfdataset(file_v, preprocess=partial_func).isel(time=0)
+        if mesh_dxv!=0:
+            mesh_dxv.to_dataset(name='dxv').to_netcdf(path_mesh+'mesh_dxv_'+model+'.nc')
+            mesh_dyu.to_dataset(name='dyu').to_netcdf(path_mesh+'mesh_dyu_'+model+'.nc')
+            mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc')
+            mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc')
+        else:       
+            print('calc horizontal meshes')
             try:
-                with ProgressBar():
+                mu,mv = prepro.calc_dxdy(model,ui,vi,path_mesh)
+            except NameError:
+                print('read and load files for mesh')
+                ui = xa.open_mfdataset(file_u, preprocess=partial_func).isel(time=0)
+                vi = xa.open_mfdataset(file_v, preprocess=partial_func).isel(time=0)
+                try:
+                    with ProgressBar():
+                        ui=ui.load()
+                        vi=vi.load()
+                except NameError:
                     ui=ui.load()
                     vi=vi.load()
-            except NameError:
-                ui=ui.load()
-                vi=vi.load()
-            mu,mv = prepro.calc_dxdy(model,ui,vi,path_mesh)
+                mu,mv = prepro.calc_dxdy(model,ui,vi,path_mesh)
 
 
     print('read t, u and v fields')
@@ -309,7 +316,6 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     trans.to_netcdf(path_save+strait+'_'+product+'_'+model+'_'+str(time_start)+'-'+str(time_end)+'.nc')
 
     return trans
-
 
 
 
