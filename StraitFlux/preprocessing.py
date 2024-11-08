@@ -40,7 +40,7 @@ def renaming_dict_exp():
         "vo": ["vomecrty"],
         "thetao": ["votemper"],
         "so": ["vosaline"],
-        "thkcello": ["e3t_0_field"],
+        "thkcello": ["e3t","e3u","e3v","e3t_0","e3v_0","e3u_0","e3t_0_field","e3u_0_field","e3v_0_field"],
     }
     return rename_dict
 
