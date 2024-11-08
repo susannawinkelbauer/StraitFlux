@@ -22,7 +22,7 @@ from StraitFlux.indices import check_availability_indices, prepare_indices
 
 
 
-def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,file_z,mesh_dxv=0, mesh_dyu=0,coords=0,set_latlon=False,lon_p=0,lat_p=0,file_s='',file_sic='',file_sit='',Arakawa='',rho=1026,cp=3996, Tref=0,path_save='',path_indices='',path_mesh='',saving=True):
+def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,file_z, file_zu=None, file_zv=None,mesh_dxv=0, mesh_dyu=0,coords=0,set_latlon=False,lon_p=0,lat_p=0,file_s='',file_sic='',file_sit='',Arakawa='',rho=1026,cp=3996, Tref=0,path_save='',path_indices='',path_mesh='',saving=True):
 
     '''Calculation of Transports using line integration
 
@@ -207,7 +207,17 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         deltaz=deltaz.load()
 
 
-    dzu3,dzv3 = func.calc_dz_faces(deltaz,grid,model,path_mesh)
+    # Check if file_zu and file_zv are provided
+    if file_zu and file_zv:
+        try:
+            dzu3 = xa.open_mfdataset(file_zu, preprocess=partial_func, chunks={'time': 1})[['thkcello']]
+            dzv3 = xa.open_mfdataset(file_zv, preprocess=partial_func, chunks={'time': 1})[['thkcello']]
+        except Exception as e:
+            print(f"Error opening file_zu or file_zv: {e}")
+            dzu3, dzv3 = func.calc_dz_faces(deltaz, grid, model, path_mesh)
+    else:
+        dzu3, dzv3 = func.calc_dz_faces(deltaz, grid, model, path_mesh)
+        
     trans = xa.Dataset({'tot_'+product+'_flux':(('time'),np.array(np.zeros(t.time.size)))},coords=dict(time=t.time))
     sign_v=[]
     indi=indices.indices[:,2][indices.indices[:,3]!=0]
