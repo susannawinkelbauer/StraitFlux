@@ -21,7 +21,7 @@ import StraitFlux.functions as func
 import StraitFlux.functions_VP as func2
 from StraitFlux.indices import check_availability_indices, prepare_indices
 
-def vel_projection(strait,model,time_start,time_end,file_u,file_v,file_t,file_z,coords=0,set_latlon=False,lat_p=0,lon_p=0,path_save='',path_indices='',path_mesh='',Arakawa='',saving=True):
+def vel_projection(strait,model,time_start,time_end,file_u,file_v,file_t,file_z, file_zu=None, file_zv=None,mesh_dxv=0, mesh_dyu=0,coords=0,set_latlon=False,lat_p=0,lon_p=0,path_save='',path_indices='',path_mesh='',Arakawa='',saving=True):
     '''
     This function calculates the u/v crossection by projecting the vectors onto the strait 
     by multiplying with the amount of the vector going through the strait and
