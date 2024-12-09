@@ -151,13 +151,19 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc')
         mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc')
     except FileNotFoundError:
-        if mesh_dxv!=0:
-            mesh_dxv.to_dataset(name='dxv').to_netcdf(path_mesh+'mesh_dxv_'+model+'.nc')
+        if isinstance(mesh_dxv, xa.Dataset):
+            original_var_name = list(mesh_dxv.data_vars)[0]
+            mesh_dxv.rename({original_var_name: "dxv"}).to_netcdf(path_mesh+'mesh_dxv_'+model+'.nc')
+            mesh_dyu.rename({original_var_name: "dyu"}).to_netcdf(path_mesh+'mesh_dyu_'+model+'.nc')
+            mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc')
+            mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc')
+        elif isinstance(mesh_dxv, xa.DataArray):
+            mesh_dxv.to_dataset(name="dxv").to_netcdf(path_mesh+'mesh_dxv_'+model+'.nc')
             mesh_dyu.to_dataset(name='dyu').to_netcdf(path_mesh+'mesh_dyu_'+model+'.nc')
             mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc')
             mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc')
         else:       
-            print('calc horizontal meshes')
+            print('meshes not supplied or not DataArray/DataSet: calc horizontal meshes')
             try:
                 mu,mv = prepro.calc_dxdy(model,ui,vi,path_mesh)
             except NameError:
