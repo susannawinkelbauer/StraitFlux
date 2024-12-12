@@ -150,7 +150,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     try:
         mu=xa.open_mfdataset(path_mesh+'mesh_dyu_'+model+'.nc', preprocess=partial_func2)
         mv=xa.open_mfdataset(path_mesh+'mesh_dxv_'+model+'.nc', preprocess=partial_func2)
-    except FileNotFoundError:
+    except:
         if isinstance(mesh_dxv, xa.Dataset):
             original_var_name = list(mesh_dxv.data_vars)[0]
             mesh_dxv.rename({original_var_name: "dxv"}).to_netcdf(path_mesh+'mesh_dxv_'+model+'.nc')
