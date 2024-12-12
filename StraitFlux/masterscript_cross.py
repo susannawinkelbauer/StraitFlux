@@ -447,7 +447,7 @@ def uvT_projection(strait,model,time_start,time_end,file_u,file_v,file_t,file_z,
     gesamt=np.where(np.isnan(u_beitrag),0,u_beitrag)+np.where(np.isnan(v_beitrag),0,v_beitrag)
     dz2=np.gradient(u.lev)
     dz3=np.transpose([dz2]*np.shape(gesamt)[-1])
-    uv_tot = xa.Dataset({'uv':(('time','depth','x'),gesamt/dz3*(u_beitrag[0]/u_beitrag[0])),'dx_int':(('x'),dist_listT_kurz2),'dz_int':(('depth'),dz2.data)},coords=dict(time=u.time,depth=u.lev.data,x=np.cumsum(dist_listT_kurz2)))
+    uv_tot = xa.Dataset({'uvT':(('time','depth','x'),gesamt/dz3*(u_beitrag[0]/u_beitrag[0])),'dx_int':(('x'),dist_listT_kurz2),'dz_int':(('depth'),dz2.data)},coords=dict(time=u.time,depth=u.lev.data,x=np.cumsum(dist_listT_kurz2)))
     uv_tot.to_netcdf(path_save+strait+'_crosssection_uv_'+model+'_'+str(time_start)+'-'+str(time_end)+'.nc')
     return uv_tot
 
