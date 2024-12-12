@@ -41,6 +41,8 @@ def renaming_dict_exp():
         "thetao": ["votemper"],
         "so": ["vosaline"],
         "thkcello": ["e3t","e3u","e3v","e3t_0","e3v_0","e3u_0","e3t_0_field","e3u_0_field","e3v_0_field"],
+        "dxv":["e1v"],
+        "dyu":["e2u"]
     }
     return rename_dict
 
