@@ -146,22 +146,22 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     if min_x == -1:
         min_x = 0
         max_x = max_x + 1
-
+    partial_func2 = partial(prepro._preprocess2,lon_bnds=(int(min_x)-1,int(max_x)+1),lat_bnds=(int(min_y)-1,int(max_y)+1))
     try:
-        mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc')
-        mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc')
+        mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc', preprocess=partial_func2)
+        mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc', preprocess=partial_func2)
     except FileNotFoundError:
         if isinstance(mesh_dxv, xa.Dataset):
             original_var_name = list(mesh_dxv.data_vars)[0]
             mesh_dxv.rename({original_var_name: "dxv"}).to_netcdf(path_mesh+'mesh_dxv_'+model+'.nc')
             mesh_dyu.rename({original_var_name: "dyu"}).to_netcdf(path_mesh+'mesh_dyu_'+model+'.nc')
-            mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc')
-            mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc')
+            mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc', preprocess=partial_func2)
+            mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc', preprocess=partial_func2)
         elif isinstance(mesh_dxv, xa.DataArray):
             mesh_dxv.to_dataset(name="dxv").to_netcdf(path_mesh+'mesh_dxv_'+model+'.nc')
             mesh_dyu.to_dataset(name='dyu').to_netcdf(path_mesh+'mesh_dyu_'+model+'.nc')
-            mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc')
-            mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc')
+            mu=xa.open_dataset(path_mesh+'mesh_dyu_'+model+'.nc', preprocess=partial_func2)
+            mv=xa.open_dataset(path_mesh+'mesh_dxv_'+model+'.nc', preprocess=partial_func2)
         else:       
             print('meshes not supplied or not DataArray/DataSet: calc horizontal meshes')
             try:
