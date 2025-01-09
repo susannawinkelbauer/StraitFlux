@@ -36,8 +36,8 @@ def renaming_dict_exp():
         ],
         "time_bounds": ["time_bnds"],
         # variables
-        "uo": ["vozocrtx"],
-        "vo": ["vomecrty"],
+        "uo": ["vozocrtx","siu","u"],
+        "vo": ["vomecrty","siv","v"],
         "thetao": ["votemper"],
         "so": ["vosaline"],
         "thkcello": ["e3t","e3u","e3v","e3t_0","e3v_0","e3u_0","e3t_0_field","e3u_0_field","e3v_0_field"],
