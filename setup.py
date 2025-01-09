@@ -11,7 +11,7 @@ setup(
     author = 'Susanna Winkelbauer',
     author_email = 'susanna.winkelbauer@univie.ac.at',
     url = 'https://github.com/susannawinkelbauer/StraitFlux',
-    download_url = 'https://github.com/susannawinkelbauer/StraitFlux/archive/refs/tags/v1.0.7.tar.gz',
+    download_url = 'https://github.com/susannawinkelbauer/StraitFlux/archive/refs/tags/v1.0.8.tar.gz',
     keywords = ['python', 'oceanic transports','curvilinear grids'],
     classifiers = ["Intended Audience :: Science/Research", "Programming Language :: Python :: 3",],
 )
