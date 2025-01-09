@@ -43,6 +43,8 @@ def renaming_dict_exp():
         "thkcello": ["e3t","e3u","e3v","e3t_0","e3v_0","e3u_0","e3t_0_field","e3u_0_field","e3v_0_field"],
         "dxv":["e1v"],
         "dyu":["e2u"]
+        "sithick": ["sithick", "sit", "SIT", "iicethic"],
+        "siconc": ["siconc", "sic", "SIC", "iiceconc"],
     }
     return rename_dict
 
@@ -199,6 +201,11 @@ def select_area(ds,out_u,out_v):
 def _preprocess1(x):
     x=wrapper(x)
     return x.isel(lev=0)
+
+## for indices selection ice
+def _preprocess1i(x):
+    x=wrapper(x)
+    return x
 
 ## for actuall fields
 def _preprocess2(x, lon_bnds, lat_bnds):
