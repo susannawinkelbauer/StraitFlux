@@ -42,9 +42,9 @@ def renaming_dict_exp():
         "so": ["vosaline"],
         "thkcello": ["e3t","e3u","e3v","e3t_0","e3v_0","e3u_0","e3t_0_field","e3u_0_field","e3v_0_field"],
         "dxv":["e1v"],
-        "dyu":["e2u"]
+        "dyu":["e2u"],
         "sithick": ["sithick", "sit", "SIT", "iicethic"],
-        "siconc": ["siconc", "sic", "SIC", "iiceconc"],
+        "siconc": ["siconc", "sic", "SIC", "iiceconc"]
     }
     return rename_dict
 
