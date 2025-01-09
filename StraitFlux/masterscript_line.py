@@ -61,7 +61,10 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     '''
 
 
-    partial_func = partial(prepro._preprocess1)
+    if product == 'ice':
+        partial_func = partial(prepro._preprocess1i)
+    else:
+        partial_func = partial(prepro._preprocess1)
 
 
     try:
@@ -69,7 +72,10 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     except OSError:
         print('calc indices')
         print('read and load files for indices')
-        ti = xa.open_mfdataset(file_t, preprocess=partial_func).isel(time=0)
+        if product == 'ice':
+            ti = xa.open_mfdataset(file_sit, preprocess=partial_func).isel(time=0)
+        else:
+            ti = xa.open_mfdataset(file_t, preprocess=partial_func).isel(time=0)
         ui = xa.open_mfdataset(file_u, preprocess=partial_func).isel(time=0)
         vi = xa.open_mfdataset(file_v, preprocess=partial_func).isel(time=0)
         try:
@@ -84,7 +90,10 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         indices,line = check_availability_indices(ti,strait,model,coords,lon_p,lat_p,set_latlon)
         i2=indices.indices.where(indices.indices!=0)
         try:
-            plt.pcolormesh((ti.thetao/ti.thetao),cmap='tab20c')
+            if product == 'ice':
+                plt.pcolormesh(ti.sithick/ti.sithick,cmap='tab20c')
+            else:
+                plt.pcolormesh((ti.thetao/ti.thetao),cmap='tab20c')
             plt.scatter(i2[:,2],i2[:,3],color='tab:red',s=0.1,marker='x')
             plt.scatter(i2[:,0],i2[:,1],color='tab:red',s=0.1,marker='x')
             plt.title(model+'_'+strait,fontsize=14)
@@ -92,7 +101,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
             plt.xlabel('x',fontsize=14)
             plt.savefig(path_save+strait+'_'+model+'_indices.png')
             plt.close()
-        except NameError:
+        except:
             print('skipping Plot')
         out_u,out_v,out_u_vz = prepare_indices(indices)
         if product == 'ice':
@@ -166,6 +175,8 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
             print('meshes not supplied or not DataArray/DataSet: calc horizontal meshes')
             try:
                 mu,mv = prepro.calc_dxdy(model,ui,vi,path_mesh)
+                mu=xa.open_mfdataset(path_mesh+'mesh_dyu_'+model+'.nc', preprocess=partial_func2)
+                mv=xa.open_mfdataset(path_mesh+'mesh_dxv_'+model+'.nc', preprocess=partial_func2) 
             except NameError:
                 print('read and load files for mesh')
                 ui = xa.open_mfdataset(file_u, preprocess=partial_func).isel(time=0)
@@ -178,6 +189,8 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
                     ui=ui.load()
                     vi=vi.load()
                 mu,mv = prepro.calc_dxdy(model,ui,vi,path_mesh)
+                mu=xa.open_mfdataset(path_mesh+'mesh_dyu_'+model+'.nc', preprocess=partial_func2)
+                mv=xa.open_mfdataset(path_mesh+'mesh_dxv_'+model+'.nc', preprocess=partial_func2) 
 
 
     print('read t, u and v fields')
@@ -185,17 +198,28 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     t = xa.open_mfdataset(file_t, preprocess=partial_func,chunks={'time':1})
     u = xa.open_mfdataset(file_u, preprocess=partial_func,chunks={'time':1})
     v = xa.open_mfdataset(file_v, preprocess=partial_func,chunks={'time':1})
+    if product == 'ice':
+        sit = xa.open_mfdataset(file_sit, preprocess=partial_func,chunks={'time':1})
+        sic = xa.open_mfdataset(file_sic, preprocess=partial_func,chunks={'time':1})
     if 'time' in t.dims and t.dims['time'] > 1:
         t=t.sel(time=slice(str(time_start),str(time_end)))
         u=u.sel(time=slice(str(time_start),str(time_end)))
         v=v.sel(time=slice(str(time_start),str(time_end)))
+        if product == 'ice':
+            sit=sit.sel(time=slice(str(time_start),str(time_end)))
+            sic=sic.sel(time=slice(str(time_start),str(time_end)))
     elif 'time' not in t.dims:
         t=t.expand_dims(dim={"time": 1})
         u=u.expand_dims(dim={"time": 1})
         v=v.expand_dims(dim={"time": 1})
-    deltaz = xa.open_mfdataset(file_z, preprocess=partial_func,chunks={'time':1})[['thkcello']]
-    if 'time' in deltaz.dims:
-        deltaz=deltaz.sel(time=slice(str(time_start),str(time_end)))
+        if product == 'ice':
+            sit=sit.expand_dims(dim={"time": 1})
+            sic=sic.expand_dims(dim={"time": 1})
+
+    if product in ['volume','heat','salt']:
+        deltaz = xa.open_mfdataset(file_z, preprocess=partial_func,chunks={'time':1})[['thkcello']]
+        if 'time' in deltaz.dims:
+            deltaz=deltaz.sel(time=slice(str(time_start),str(time_end)))
     mu=mu.sel(x=slice(int(min_x)-1,int(max_x)+1),y=slice(int(min_y)-1,int(max_y)+1)).load()
     mv=mv.sel(x=slice(int(min_x)-1,int(max_x)+1),y=slice(int(min_y)-1,int(max_y)+1)).load()
 
@@ -205,24 +229,26 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
             t=t.load()
             u=u.load()
             v=v.load()
-            deltaz=deltaz.load()
+            if product in ['volume','heat','salt']:
+                deltaz=deltaz.load()
     except NameError:
         t=t.load()
         u=u.load()
         v=v.load()
-        deltaz=deltaz.load()
+        if product in ['volume','heat','salt']:
+            deltaz=deltaz.load()
 
-
-    # Check if file_zu and file_zv are provided
-    if file_zu and file_zv:
-        try:
-            dzu3 = xa.open_mfdataset(file_zu, preprocess=partial_func, chunks={'time': 1})[['thkcello']]
-            dzv3 = xa.open_mfdataset(file_zv, preprocess=partial_func, chunks={'time': 1})[['thkcello']]
-        except Exception as e:
-            print(f"Error opening file_zu or file_zv: {e}")
+    if product in ['volume','heat','salt']:
+        # Check if file_zu and file_zv are provided
+        if file_zu and file_zv:
+            try:
+                dzu3 = xa.open_mfdataset(file_zu, preprocess=partial_func, chunks={'time': 1})[['thkcello']]
+                dzv3 = xa.open_mfdataset(file_zv, preprocess=partial_func, chunks={'time': 1})[['thkcello']]
+            except Exception as e:
+                print(f"Error opening file_zu or file_zv: {e}")
+                dzu3, dzv3 = func.calc_dz_faces(deltaz, grid, model, path_mesh)
+        else:
             dzu3, dzv3 = func.calc_dz_faces(deltaz, grid, model, path_mesh)
-    else:
-        dzu3, dzv3 = func.calc_dz_faces(deltaz, grid, model, path_mesh)
         
     trans = xa.Dataset({'tot_'+product+'_flux':(('time'),np.array(np.zeros(t.time.size)))},coords=dict(time=t.time))
     sign_v=[]
@@ -283,6 +309,8 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         vdata=vdata*mv2.dxv.values*dzv3.values*Svdata.values
 
     if product == 'ice':
+        if sic.siconc.max() > 1:
+            sic['siconc'] = sic.siconc/100
         print('calc u')
         udata=udata*mu.dyu.values*sit.sithick.values*sic.siconc.values
         print('calc v')
