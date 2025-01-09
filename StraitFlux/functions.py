@@ -153,7 +153,7 @@ def check_indices(indices,out_u,out_v,t,u,v,strait,model,path_save):
         plt.xlabel('x',fontsize=14)
         plt.savefig(path_save+strait+'_'+model+'_indices_check.png')
         plt.close()
-    except NameError:
+    except:
         print('skipping Plot')
 
 def interp_TS(ds,d):
