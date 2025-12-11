@@ -242,8 +242,8 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         # Check if file_zu and file_zv are provided
         if file_zu and file_zv:
             try:
-                dzu3 = xa.open_mfdataset(file_zu, preprocess=partial_func, chunks={'time': 1})[['thkcello']]
-                dzv3 = xa.open_mfdataset(file_zv, preprocess=partial_func, chunks={'time': 1})[['thkcello']]
+                dzu3 = xa.open_mfdataset(file_zu, preprocess=partial_func, chunks={'time': 1})['thkcello']
+                dzv3 = xa.open_mfdataset(file_zv, preprocess=partial_func, chunks={'time': 1})['thkcello']
             except Exception as e:
                 print(f"Error opening file_zu or file_zv: {e}")
                 dzu3, dzv3 = func.calc_dz_faces(deltaz, grid, model, path_mesh)
@@ -360,6 +360,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     trans.to_netcdf(path_save+strait+'_'+product+'_'+model+'_'+str(time_start)+'-'+str(time_end)+'.nc')
 
     return trans
+
 
 
 
