@@ -167,7 +167,56 @@ def distance(lat1,lon1,lat2,lon2):
     distance=a*2*np.arcsin(c/2) 
     return distance
 
-def calc_dxdy(model,u,v,path_mesh):
+def calc_dxdy(model, u, v, path_mesh):
+
+    lat_u = u.lat.values
+    lon_u = u.lon.values
+    lat_v = v.lat.values
+    lon_v = v.lon.values
+
+    Ny, Nx = lat_u.shape
+
+    dy = np.zeros_like(lat_u, dtype=np.float64)
+    dx = np.zeros_like(lat_v, dtype=np.float64)
+
+    for i in tqdm(range(Ny - 1), desc="dy (north-south)"):
+        dy[i+1, :] = distance(
+            lat_u[i,   :], lon_u[i,   :],
+            lat_u[i+1, :], lon_u[i+1, :]
+        )
+
+    for j in tqdm(range(Nx - 1), desc="dx (east-west)"):
+        dx[:, j+1] = distance(
+            lat_v[:, j],   lon_v[:, j],
+            lat_v[:, j+1], lon_v[:, j+1]
+        )
+
+    dy_m = dy * 1000.0
+    dx_m = dx * 1000.0
+
+    dy_da = xr.DataArray(
+        dy_m,
+        coords=u.lat.coords,
+        dims=u.lat.dims,
+        name="dyu",
+    )
+    dx_da = xr.DataArray(
+        dx_m,
+        coords=v.lat.coords,
+        dims=v.lat.dims,
+        name="dxv",
+    )
+
+    mu = dy_da.to_dataset(name="dyu")
+    mv = dx_da.to_dataset(name="dxv")
+
+    mu.to_netcdf(path_mesh + "mesh_dyu_" + model + ".nc")
+    mv.to_netcdf(path_mesh + "mesh_dxv_" + model + ".nc")
+
+    return mu, mv
+
+
+def calc_dxdy_old(model,u,v,path_mesh):
 
     dy=xa.DataArray(data=np.zeros(u.lat.shape),coords=u.lat.coords,dims=u.lat.dims)
     dx=xa.DataArray(data=np.zeros(v.lat.shape),coords=v.lat.coords,dims=v.lat.dims)
@@ -242,6 +291,7 @@ def kart_2_kugel(x,y,z):
             lon = np.degrees(np.arctan(y[i]/x[i])) - 180
         lon2=np.append(lon2,lon)
     return lat,lon2
+
 
 
 
