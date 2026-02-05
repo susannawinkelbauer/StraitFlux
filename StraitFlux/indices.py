@@ -37,7 +37,10 @@ def def_indices(strait,coords,lon_p,lat_p,set_latlon,res):
         lon = np.array(np.linspace(18,19.8,len(lat)))
     elif strait == 'RAPID':
         lon = np.array(np.arange(-80.5,-13.5,res))
-        lat = np.array(np.linspace(26.0,26.0,len(lon)))
+        lat = np.array(np.linspace(26.0,26.0,len(lon)))        
+    elif strait == 'SAMBA':
+        lon = np.array(np.arange(-55,20,res))
+        lat = np.array(np.linspace(-34.5,-34.5,len(lon)))
     elif strait == 'OSNAP':
         lon1 = np.array(np.arange(-57,-44.6,res))
         lat1 = np.array(np.linspace(52,60.1888,len(lon1)))
@@ -345,4 +348,3 @@ def prepare_indices(indices):
     out_u_vz = out_u_vz[~masku]
 
     return out_u,out_v,out_u_vz
-
