@@ -1,4 +1,4 @@
-import xarray as xa
+import xarray as xr
 import numpy as np
 from tqdm import tqdm
 from xmip.preprocessing import rename_cmip6,promote_empty_dims, broadcast_lonlat, correct_coordinates
@@ -212,14 +212,16 @@ def calc_dxdy(model, u, v, path_mesh):
 
     mu.to_netcdf(path_mesh + "mesh_dyu_" + model + ".nc")
     mv.to_netcdf(path_mesh + "mesh_dxv_" + model + ".nc")
+    print('save', path_mesh + "mesh_dyu_" + model + ".nc")
+    print('save', path_mesh + "mesh_dyu_" + model + ".nc")
 
     return mu, mv
 
 
 def calc_dxdy_old(model,u,v,path_mesh):
 
-    dy=xa.DataArray(data=np.zeros(u.lat.shape),coords=u.lat.coords,dims=u.lat.dims)
-    dx=xa.DataArray(data=np.zeros(v.lat.shape),coords=v.lat.coords,dims=v.lat.dims)
+    dy=xr.DataArray(data=np.zeros(u.lat.shape),coords=u.lat.coords,dims=u.lat.dims)
+    dx=xr.DataArray(data=np.zeros(v.lat.shape),coords=v.lat.coords,dims=v.lat.dims)
     for i in tqdm(range(0,len(u.y)-1)):
         #print(i)
         dy[i+1,:]=distance(u.lat[i,:],u.lon[i,:],u.lat[i+1,:],u.lon[i+1,:])
@@ -291,7 +293,3 @@ def kart_2_kugel(x,y,z):
             lon = np.degrees(np.arctan(y[i]/x[i])) - 180
         lon2=np.append(lon2,lon)
     return lat,lon2
-
-
-
-

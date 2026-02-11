@@ -19,6 +19,140 @@ import StraitFlux.preprocessing as prepro
 import StraitFlux.functions as func
 from StraitFlux.indices import check_availability_indices, prepare_indices
 
+def save_section_flux_detailed(udata, vdata, Tdata, Sdata, out_u, out_v, out_u_vz, 
+                                 indices, sign_v, min_x, min_y, product, strait, 
+                                 model, time_start, time_end, path_save):
+    """
+    Save detailed section flux for density-space analysis.
+    Output: Normal flux, T, S at each section point (U/V faces) for later density binning.
+    """
+    
+    # Extract section points from indices
+    indi1 = indices.indices[:,2][indices.indices[:,3]!=0] # meridional
+    indi2 = indices.indices[:,3][indices.indices[:,3]!=0]
+    
+    # Build section point lists
+    npt_u = len(out_u)
+    npt_v = len(indi1) - 1 if len(indi1) > 0 else 0
+    
+    nt, nlev = udata.shape[0], udata.shape[1]
+    
+    # Extract U-face section flux: qn_u(time, lev, npt_u) [m³/s]
+    if npt_u > 0:
+        qn_u_list, lon_u_list, lat_u_list = [], [], []
+        for l in range(npt_u):
+            iy, ix = int(out_u_vz[l,1]-min_y+1), int(out_u_vz[l,0]-min_x+1)
+            sign = -1 if out_u_vz[l][2] == -1 else 1
+            qn_u_list.append(udata[:, :, iy, ix].values * sign)
+            lon_u_list.append(udata.lon[iy, ix].values)
+            lat_u_list.append(udata.lat[iy, ix].values)
+        qn_u = np.stack(qn_u_list, axis=2)
+        lon_u, lat_u = np.array(lon_u_list), np.array(lat_u_list)
+    else:
+        qn_u = np.zeros((nt, nlev, 0))
+        lon_u, lat_u = np.array([]), np.array([])
+    
+    # Extract V-face section flux: qn_v(time, lev, npt_v) [m³/s]
+    if npt_v > 0:
+        qn_v_list, lon_v_list, lat_v_list = [], [], []
+        for m in range(npt_v):
+            iy, ix = int(indi2[m]-min_y+1), int(indi1[m]-min_x+1)
+            qn_v_list.append(vdata[:, :, iy, ix].values * sign_v[m])
+            lon_v_list.append(vdata.lon[iy, ix].values)
+            lat_v_list.append(vdata.lat[iy, ix].values)
+        qn_v = np.stack(qn_v_list, axis=2)
+        lon_v, lat_v = np.array(lon_v_list), np.array(lat_v_list)
+    else:
+        qn_v = np.zeros((nt, nlev, 0))
+        lon_v, lat_v = np.array([]), np.array([])
+    
+    # Interpolate T/S to U/V faces (flux-consistent positions)
+    if product in ['volume', 'heat', 'salt']:
+        
+        T_raw = Tdata.thetao.values  # (time, lev, y, x)
+        S_raw = Sdata.so.values if Sdata is not None else None
+
+        # T at U-faces
+        if npt_u > 0:
+            T_u_list = []
+            for l in range(npt_u):
+                iy, ix = int(out_u_vz[l,1]-min_y+1), int(out_u_vz[l,0]-min_x+1)
+                T_u_list.append(T_raw[:, :, iy, ix])  
+            T_u = np.stack(T_u_list, axis=2)
+        else:
+            T_u = np.full((nt, nlev, 0), np.nan)
+
+        # S at U-faces
+        if Sdata is not None and npt_u > 0:
+            S_u_list = []
+            for l in range(npt_u):
+                iy, ix = int(out_u_vz[l,1]-min_y+1), int(out_u_vz[l,0]-min_x+1)
+                S_u_list.append(S_raw[:, :, iy, ix])
+            S_u = np.stack(S_u_list, axis=2)
+        else:
+            S_u = np.full((nt, nlev, npt_u), np.nan)
+
+        # V-faces 
+        if npt_v > 0:
+            T_v_list = []
+            for m in range(npt_v):
+                iy, ix = int(indi2[m]-min_y+1), int(indi1[m]-min_x+1)
+                T_v_list.append(T_raw[:, :, iy, ix])
+            T_v = np.stack(T_v_list, axis=2)
+        else:
+            T_v = np.full((nt, nlev, 0), np.nan)
+
+        if Sdata is not None and npt_v > 0:
+            S_v_list = []
+            for m in range(npt_v):
+                iy, ix = int(indi2[m]-min_y+1), int(indi1[m]-min_x+1)
+                S_v_list.append(S_raw[:, :, iy, ix])
+            S_v = np.stack(S_v_list, axis=2)
+        else:
+            S_v = np.full((nt, nlev, npt_v), np.nan)
+
+    
+    # Calculate verification variable: Q_level(time, lev)
+    Q_level = qn_u.sum(axis=2) + qn_v.sum(axis=2)
+    
+    # Build Dataset
+    ds_section = xa.Dataset(
+        {
+            'qn_u': (['time', 'lev', 'npt_u'], qn_u),
+            'qn_v': (['time', 'lev', 'npt_v'], qn_v),
+            'T_u': (['time', 'lev', 'npt_u'], T_u),
+            'T_v': (['time', 'lev', 'npt_v'], T_v),
+            'S_u': (['time', 'lev', 'npt_u'], S_u),
+            'S_v': (['time', 'lev', 'npt_v'], S_v),
+            'Q_level': (['time', 'lev'], Q_level),
+            'lon_u': (['npt_u'], lon_u),
+            'lat_u': (['npt_u'], lat_u),
+            'lon_v': (['npt_v'], lon_v),
+            'lat_v': (['npt_v'], lat_v),
+        },
+        coords={
+            'time': udata.time,
+            'lev': udata.lev,
+            'npt_u': np.arange(npt_u),
+            'npt_v': np.arange(npt_v),
+        }
+    )
+    
+    # Add metadata
+    ds_section['qn_u'].attrs = {'long_name': 'Normal volume flux at U-face section points', 'units': 'm³/s'}
+    ds_section['qn_v'].attrs = {'long_name': 'Normal volume flux at V-face section points', 'units': 'm³/s'}
+    # σ0/σ2 is insensitive to horizontal half-cell offset. The effect of lateral half-cell offset (~several kilometres) on temperature/salinity is typically < 0.1°C/0.1 PSU in non-frontal zones, with an impact on density of ~0.01 kg/m³. But much efficient than interpolation
+    ds_section['T_u'].attrs = {'long_name': 'Temperature at U-face (flux-consistent)', 'units': '°C', 'note': 'No interpolation applied'}
+    ds_section['T_v'].attrs = {'long_name': 'Temperature at V-face (flux-consistent)', 'units': '°C', 'note': 'No interpolation applied'}
+    ds_section['S_u'].attrs = {'long_name': 'Salinity at U-face (flux-consistent)', 'units': 'PSU'}
+    ds_section['S_v'].attrs = {'long_name': 'Salinity at V-face (flux-consistent)', 'units': 'PSU'}
+    ds_section['Q_level'].attrs = {'long_name': 'Total flux per level (verification)', 'units': 'm³/s'}
+    ds_section['lev'].attrs = {'long_name': 'Depth (T-point center)', 'units': 'm', 'positive': 'down'}
+    
+    # Save
+    outfile = f"{path_save}{strait}_section_detailed_{model}_{time_start}-{time_end}.nc"
+    ds_section.to_netcdf(outfile)
+    print(f"✓ Saved detailed section flux: {outfile}")
 
 
 
@@ -72,12 +206,25 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     except OSError:
         print('calc indices')
         print('read and load files for indices')
-        if product == 'ice':
-            ti = xa.open_mfdataset(file_sit, preprocess=partial_func).isel(time=0)
+        # Use only first file for indices calculation
+        if isinstance(file_t, list):
+            file_t_first = [file_t[0]]
+            file_u_first = [file_u[0]]
+            file_v_first = [file_v[0]]
+            file_sit_first = [file_sit[0]] if file_sit else file_sit
         else:
-            ti = xa.open_mfdataset(file_t, preprocess=partial_func).isel(time=0)
-        ui = xa.open_mfdataset(file_u, preprocess=partial_func).isel(time=0)
-        vi = xa.open_mfdataset(file_v, preprocess=partial_func).isel(time=0)
+            file_t_first = file_t
+            file_u_first = file_u
+            file_v_first = file_v
+            file_sit_first = file_sit
+
+        if product == 'ice':
+            ti = xa.open_mfdataset(file_sit_first, preprocess=partial_func).isel(time=0)
+        else:
+            ti = xa.open_mfdataset(file_t_first, preprocess=partial_func).isel(time=0)
+
+        ui = xa.open_mfdataset(file_u_first, preprocess=partial_func).isel(time=0)
+        vi = xa.open_mfdataset(file_v_first, preprocess=partial_func).isel(time=0)
         try:
             with ProgressBar():
                 ti=ti.load()
@@ -101,6 +248,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
             plt.xlabel('x',fontsize=14)
             plt.savefig(path_save+strait+'_'+model+'_indices.png')
             plt.close()
+            print(f" Saved indices plot: {path_save+strait+'_'+model+'_indices.png'}")
         except:
             print('skipping Plot')
         out_u,out_v,out_u_vz = prepare_indices(indices)
@@ -126,9 +274,19 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
                         f.write(grid)
             except NameError:
                 print('read and load files for grid check')
-                ti = xa.open_mfdataset(file_t, preprocess=partial_func).isel(time=0)
-                ui = xa.open_mfdataset(file_u, preprocess=partial_func).isel(time=0)
-                vi = xa.open_mfdataset(file_v, preprocess=partial_func).isel(time=0)
+                if isinstance(file_t, list):
+                    file_t_first = [file_t[0]]
+                    file_u_first = [file_u[0]]
+                    file_v_first = [file_v[0]]
+                    file_sit_first = [file_sit[0]] if file_sit else file_sit
+                else:
+                    file_t_first = file_t
+                    file_u_first = file_u
+                    file_v_first = file_v
+                    file_sit_first = file_sit
+                ti = xa.open_mfdataset(file_t_first, preprocess=partial_func).isel(time=0)
+                ui = xa.open_mfdataset(file_u_first, preprocess=partial_func).isel(time=0)
+                vi = xa.open_mfdataset(file_v_first, preprocess=partial_func).isel(time=0)
                 try:
                     with ProgressBar():
                         ti=ti.load()
@@ -179,8 +337,17 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
                 mv=xa.open_mfdataset(path_mesh+'mesh_dxv_'+model+'.nc', preprocess=partial_func2) 
             except NameError:
                 print('read and load files for mesh')
-                ui = xa.open_mfdataset(file_u, preprocess=partial_func).isel(time=0)
-                vi = xa.open_mfdataset(file_v, preprocess=partial_func).isel(time=0)
+                # ui = xa.open_mfdataset(file_u, preprocess=partial_func).isel(time=0)
+                # vi = xa.open_mfdataset(file_v, preprocess=partial_func).isel(time=0)
+                if isinstance(file_t, list):
+                    file_u_first = [file_u[0]]
+                    file_v_first = [file_v[0]]
+                else:
+                    file_u_first = file_u
+                    file_v_first = file_v
+                ui = xa.open_mfdataset(file_u_first, preprocess=partial_func).isel(time=0)
+                vi = xa.open_mfdataset(file_v_first, preprocess=partial_func).isel(time=0)
+                
                 try:
                     with ProgressBar():
                         ui=ui.load()
@@ -273,8 +440,8 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     vdata = v.vo
     Tdata = t
 
-    if product == 'salt':
-        Sdata = xa.open_mfdataset(file_s, preprocess=partial_func,chunks={'time':1}).sel(time=slice(str(time_start),str(time_end)))
+    # if product == 'salt':
+    Sdata = xa.open_mfdataset(file_s, preprocess=partial_func,chunks={'time':1}).sel(time=slice(str(time_start),str(time_end)))
 
 
     if product in ['volume','heat','salt']:
@@ -303,7 +470,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         print('rolling S')
         Sudata = func.interp_TS(Sdata.so,'x')
         Svdata = func.interp_TS(Sdata.so,'y')
-        print('calc u')
+        print('calc u') 
         udata=udata*mu2.dyu.values*dzu3.values*Sudata.values
         print('calc v')
         vdata=vdata*mv2.dxv.values*dzv3.values*Svdata.values
@@ -320,6 +487,12 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     vdata = vdata.fillna(0.)
     print('calc line')
     if product in ['volume','heat','salt']:
+        save_section_flux_detailed(
+            udata, vdata, Tdata, Sdata, out_u, out_v, out_u_vz, 
+            indices, sign_v, min_x, min_y, product, strait, 
+            model, time_start, time_end, path_save
+        )
+    
         udata = udata.sum(dim='lev')
         vdata = vdata.sum(dim='lev')
     datau = xa.Dataset({'inte':(('time','y','x'),udata.data)},coords=({'time':('time',udata.time.data),'x':('x',udata.x.data),'y':('y',udata.y.data)}))
@@ -350,7 +523,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         ges_l['inte'] = ges_l['inte'] * rho * cp
     elif product == 'salt':
         ges_l['inte'] = ges_l['inte'] * rho
-    #ges_l.to_netcdf(model+'_'+strait+'_test.nc')
+    # ges_l.to_netcdf(model+'_'+strait+'_test.nc')
     summ = ges_l.sum(dim=['x','y'])
     summ = summ.inte
     trans_arr = np.append(trans_arr,summ)
@@ -358,9 +531,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     trans[model]= (['time'],trans_arr)
     trans = trans.drop_vars('tot_'+product+'_flux')
     trans.to_netcdf(path_save+strait+'_'+product+'_'+model+'_'+str(time_start)+'-'+str(time_end)+'.nc')
+    print('- save net transport (LM):', path_save+strait+'_'+product+'_'+model+'_'+str(time_start)+'-'+str(time_end)+'.nc')
+    
 
     return trans
-
-
-
-
