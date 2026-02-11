@@ -21,8 +21,7 @@ from StraitFlux.indices import check_availability_indices, prepare_indices
 
 def save_section_flux_detailed(udata, vdata, Tdata, Sdata, out_u, out_v, out_u_vz, 
                                  indices, sign_v, min_x, min_y, product, strait, 
-                                 model, time_start, time_end, path_save, 
-                                 file_s=None, rho=1026, cp=3996):
+                                 model, time_start, time_end, path_save):
     """
     Save detailed section flux for density-space analysis.
     Output: Normal flux, T, S at each section point (U/V faces) for later density binning.
@@ -69,16 +68,16 @@ def save_section_flux_detailed(udata, vdata, Tdata, Sdata, out_u, out_v, out_u_v
     
     # Interpolate T/S to U/V faces (flux-consistent positions)
     if product in ['volume', 'heat', 'salt']:
-        # 替换为直接提取 T 点：
+        
         T_raw = Tdata.thetao.values  # (time, lev, y, x)
         S_raw = Sdata.so.values if Sdata is not None else None
 
-        # T at U-faces (用 T 点值)
+        # T at U-faces
         if npt_u > 0:
             T_u_list = []
             for l in range(npt_u):
                 iy, ix = int(out_u_vz[l,1]-min_y+1), int(out_u_vz[l,0]-min_x+1)
-                T_u_list.append(T_raw[:, :, iy, ix])  # 直接取，不 .values
+                T_u_list.append(T_raw[:, :, iy, ix])  
             T_u = np.stack(T_u_list, axis=2)
         else:
             T_u = np.full((nt, nlev, 0), np.nan)
@@ -93,7 +92,7 @@ def save_section_flux_detailed(udata, vdata, Tdata, Sdata, out_u, out_v, out_u_v
         else:
             S_u = np.full((nt, nlev, npt_u), np.nan)
 
-        # V-faces 同理
+        # V-faces 
         if npt_v > 0:
             T_v_list = []
             for m in range(npt_v):
@@ -249,6 +248,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
             plt.xlabel('x',fontsize=14)
             plt.savefig(path_save+strait+'_'+model+'_indices.png')
             plt.close()
+            print(f" Saved indices plot: {path_save+strait+'_'+model+'_indices.png'}")
         except:
             print('skipping Plot')
         out_u,out_v,out_u_vz = prepare_indices(indices)
