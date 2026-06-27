@@ -3,12 +3,38 @@ import numpy as np
 from tqdm import tqdm
 from xmip.preprocessing import rename_cmip6,promote_empty_dims, broadcast_lonlat, correct_coordinates
 
-def renaming_dict_exp():
+def _merge_rename_dicts(default_dict, user_rename_dict=None):
+    """Merge user-supplied rename candidates into the default rename dictionary.
+
+    user_rename_dict should have the same structure as renaming_dict_exp(),
+    e.g. {"thetao": ["temp"], "uo": ["uvel"]}. User names are
+    prepended so they have priority, while default names remain available.
+    """
+    if user_rename_dict is None:
+        return default_dict
+
+    merged = {key: list(value) for key, value in default_dict.items()}
+
+    for key, values in user_rename_dict.items():
+        if isinstance(values, str):
+            values = [values]
+        else:
+            values = list(values)
+
+        if key in merged:
+            merged[key] = list(dict.fromkeys(values + merged[key]))
+        else:
+            merged[key] = list(dict.fromkeys(values))
+
+    return merged
+
+
+def renaming_dict_exp(user_rename_dict=None):
     rename_dict = {
         # dim labels (order represents the priority when checking for the dim labels)
         "x": ["i", "ni", "xh", "nlon","ncl3"],
         "y": ["j", "nj", "yh", "nlat","ncl2"],
-        "lev": ["deptht", "olevel", "zlev", "olev", "depth","depthu","depthv","ncl1"],
+        "lev": ["deptht", "olevel", "zlev", "olev", "depth","depthu","depthv","ncl1","nav_lev", "z"],
         "bnds": ["bnds", "axis_nbounds", "d2"],
         "vertex": ["vertex", "nvertex", "vertices"],
         # coordinate labels
@@ -40,13 +66,13 @@ def renaming_dict_exp():
         "vo": ["vomecrty","siv","v"],
         "thetao": ["votemper"],
         "so": ["vosaline"],
-        "thkcello": ["e3t","e3u","e3v","e3t_0","e3v_0","e3u_0","e3t_0_field","e3u_0_field","e3v_0_field"],
+        "thkcello": ["e3t", "e3t_0", "e3t_0_field"],
         "dxv":["e1v"],
         "dyu":["e2u"],
         "sithick": ["sithick", "sit", "SIT", "iicethic"],
         "siconc": ["siconc", "sic", "SIC", "iiceconc"]
     }
-    return rename_dict
+    return _merge_rename_dicts(rename_dict, user_rename_dict)
 
 
 def lon_to_180(ds):
@@ -104,8 +130,8 @@ def corr_lonlat_dims(ds):
 
 def rename_time_lev(ds):
     rename_dict = {
-        "lev": ["deptht", "olevel", "zlev", "olev", "depth","depthu","depthv","ncl1"],
-        "time": ["time_counter"],
+        "lev": ["deptht", "olevel", "zlev", "olev", "depth", "depthu", "depthv", "ncl1", "nav_lev", "z"],
+        "time": ["time_counter", "t"],
     }
     for i in ds.coords:
         for target, candidates in rename_dict.items():
@@ -128,10 +154,46 @@ def drop_cyclic_points(ds):
     ds=ds.sel(x=np.sort(ind))
     return ds
 
-def wrapper(ds):
+
+def rename_vertical_metrics(ds):
+    """Rename U/V vertical thickness metrics without losing T/U/V identity.
+
+    The generic CMIP-style name ``thkcello`` is reserved for T-cell
+    thickness. U- and V-face thicknesses are kept separately as
+    ``thkcello_u`` and ``thkcello_v``. This allows one mesh file to contain
+    e3t_0, e3u_0 and e3v_0 simultaneously.
+    """
+    rename_map = {}
+
+    t_candidates = ["e3t", "e3t_0", "e3t_0_field"]
+    u_candidates = ["e3u", "e3u_0", "e3u_0_field"]
+    v_candidates = ["e3v", "e3v_0", "e3v_0_field"]
+
+    for old in t_candidates:
+        if old in ds and "thkcello" not in ds:
+            rename_map[old] = "thkcello"
+            break
+
+    for old in u_candidates:
+        if old in ds and "thkcello_u" not in ds:
+            rename_map[old] = "thkcello_u"
+            break
+
+    for old in v_candidates:
+        if old in ds and "thkcello_v" not in ds:
+            rename_map[old] = "thkcello_v"
+            break
+
+    if rename_map:
+        ds = ds.rename(rename_map)
+
+    return ds
+
+def wrapper(ds, user_rename_dict=None):
     ds = ds.copy()
     ds = rename_time_lev(ds)
-    ds = rename_cmip6(ds,rename_dict=renaming_dict_exp())
+    ds = rename_cmip6(ds, rename_dict=renaming_dict_exp(user_rename_dict))
+    ds = rename_vertical_metrics(ds)
     ds = promote_empty_dims(ds)
     ds = broadcast_lonlat(ds)
     ds = correct_coordinates(ds)
@@ -174,34 +236,33 @@ def calc_dxdy(model, u, v, path_mesh):
     lat_v = v.lat.values
     lon_v = v.lon.values
 
-    Ny, Nx = lat_u.shape
+    Ny_u, Nx_u = lat_u.shape
+    Ny_v, Nx_v = lat_v.shape
 
     dy = np.zeros_like(lat_u, dtype=np.float64)
     dx = np.zeros_like(lat_v, dtype=np.float64)
 
-    for i in tqdm(range(Ny - 1), desc="dy (north-south)"):
-        dy[i+1, :] = distance(
-            lat_u[i,   :], lon_u[i,   :],
-            lat_u[i+1, :], lon_u[i+1, :]
+    for i in tqdm(range(Ny_u - 1), desc="dy (north-south)"):
+        dy[i + 1, :] = distance(
+            lat_u[i, :], lon_u[i, :],
+            lat_u[i + 1, :], lon_u[i + 1, :]
         )
 
-    for j in tqdm(range(Nx - 1), desc="dx (east-west)"):
-        dx[:, j+1] = distance(
-            lat_v[:, j],   lon_v[:, j],
-            lat_v[:, j+1], lon_v[:, j+1]
+    for j in tqdm(range(Nx_v - 1), desc="dx (east-west)"):
+        dx[:, j + 1] = distance(
+            lat_v[:, j], lon_v[:, j],
+            lat_v[:, j + 1], lon_v[:, j + 1]
         )
 
-    dy_m = dy * 1000.0
-    dx_m = dx * 1000.0
-
-    dy_da = xr.DataArray(
-        dy_m,
+    dy_da = xa.DataArray(
+        dy * 1000.0,
         coords=u.lat.coords,
         dims=u.lat.dims,
         name="dyu",
     )
-    dx_da = xr.DataArray(
-        dx_m,
+
+    dx_da = xa.DataArray(
+        dx * 1000.0,
         coords=v.lat.coords,
         dims=v.lat.dims,
         name="dxv",
@@ -247,18 +308,22 @@ def select_area(ds,out_u,out_v):
     return ds
 
 ## for indices selection
-def _preprocess1(x):
-    x=wrapper(x)
+def _preprocess1(x, user_rename_dict=None):
+    x=wrapper(x, user_rename_dict=user_rename_dict)
     return x.isel(lev=0)
 
+def _preprocess11(x, user_rename_dict=None):
+    x=wrapper(x, user_rename_dict=user_rename_dict)
+    return x
+
 ## for indices selection ice
-def _preprocess1i(x):
-    x=wrapper(x)
+def _preprocess1i(x, user_rename_dict=None):
+    x=wrapper(x, user_rename_dict=user_rename_dict)
     return x
 
 ## for actuall fields
-def _preprocess2(x, lon_bnds, lat_bnds):
-    x=wrapper(x)
+def _preprocess2(x, lon_bnds, lat_bnds, user_rename_dict=None):
+    x=wrapper(x, user_rename_dict=user_rename_dict)
     return x.sel(x=slice(*lon_bnds), y=slice(*lat_bnds))
 
 

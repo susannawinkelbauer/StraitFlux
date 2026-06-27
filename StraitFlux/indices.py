@@ -37,7 +37,7 @@ def def_indices(strait,coords,lon_p,lat_p,set_latlon,res):
         lon = np.array(np.linspace(18,19.8,len(lat)))
     elif strait == 'RAPID':
         lon = np.array(np.arange(-80.5,-13.5,res))
-        lat = np.array(np.linspace(26.0,26.0,len(lon)))
+        lat = np.array(np.linspace(26.5,26.5,len(lon)))
     elif strait == 'OSNAP':
         lon1 = np.array(np.arange(-57,-44.6,res))
         lat1 = np.array(np.linspace(52,60.1888,len(lon1)))
@@ -93,8 +93,12 @@ def def_indices(strait,coords,lon_p,lat_p,set_latlon,res):
         lon = np.array(np.arange(-6.8700,-1.1695,res))
         lat = np.array(np.linspace(62.0669,60.2777,len(lon)))
     else:
-        print('strait not defined, please provide coordinates: coords=(lat_start,lon_start,lat_end,lon_end)')
-        sys.exit()
+        raise ValueError(
+            f"Strait '{strait}' is not predefined. "
+            "Please provide coords=(lat_start, lon_start, "
+            "lat_end, lon_end) or use "
+            "set_latlon=True with lon_p and lat_p."
+        )
 
     return lat,lon
 
