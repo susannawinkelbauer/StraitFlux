@@ -32,6 +32,7 @@ The following packages have to be installed:<br>
 `xmip`<br>
 `tqdm`<br>
 To use all functions and improve the performance also add:<br>
+`gsw`<br>
 `matplotlib`<br>
 `dask`<br>
 
