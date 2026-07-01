@@ -189,11 +189,104 @@ def rename_vertical_metrics(ds):
 
     return ds
 
+def ensure_2d_latlon(ds):
+    """
+    Convert 1D lat/lon coordinates on regular grids to 2D lat(y, x), lon(y, x).
+
+    StraitFlux internally expects 2D latitude/longitude arrays. Curvilinear grids
+    already have this format, but regular lat-lon grids often store lat(y) and
+    lon(x). This function converts those to 2D arrays.
+    """
+
+    if "lat" not in ds or "lon" not in ds:
+        return ds
+
+    lat = ds["lat"]
+    lon = ds["lon"]
+
+    if lat.ndim == 2 and lon.ndim == 2:
+        return ds
+
+    if lat.ndim != 1 or lon.ndim != 1:
+        return ds
+
+    lat_dim = lat.dims[0]
+    lon_dim = lon.dims[0]
+
+    lat2d, lon2d = np.meshgrid(lat.values, lon.values, indexing="ij")
+
+    ds = ds.assign_coords(
+        {
+            "lat": ((lat_dim, lon_dim), lat2d),
+            "lon": ((lat_dim, lon_dim), lon2d),
+        }
+    )
+
+    return ds
+
+def _save_1d_latlon(ds):
+    """Save 1D latitude/longitude values before xmip renaming can drop them."""
+
+    lat_candidates = ["lat", "latitude", "nav_lat"]
+    lon_candidates = ["lon", "longitude", "nav_lon"]
+
+    lat_name = next((name for name in lat_candidates if name in ds), None)
+    lon_name = next((name for name in lon_candidates if name in ds), None)
+
+    if lat_name is None or lon_name is None:
+        return ds, None, None
+
+    lat = ds[lat_name]
+    lon = ds[lon_name]
+
+    if lat.ndim == 1 and lon.ndim == 1:
+        return ds, lat.values.copy(), lon.values.copy()
+
+    return ds, None, None
+
+def _restore_regular_1d_latlon(ds, lat_vals, lon_vals):
+    """Restore saved regular-grid 1D lat/lon as 2D StraitFlux coordinates."""
+
+    if lat_vals is None or lon_vals is None:
+        return ds, False
+
+    if "y" not in ds.dims or "x" not in ds.dims:
+        return ds, False
+
+    if ds.sizes["y"] != len(lat_vals) or ds.sizes["x"] != len(lon_vals):
+        return ds, False
+
+    lon_vals = np.asarray(lon_vals)
+    lat_vals = np.asarray(lat_vals)
+
+    lon_vals = np.where(lon_vals > 180, lon_vals - 360, lon_vals)
+
+    lat2d, lon2d = np.meshgrid(lat_vals, lon_vals, indexing="ij")
+
+    for name in ["lat", "lon", "latitude", "longitude", "nav_lat", "nav_lon"]:
+        if name in ds:
+            ds = ds.drop_vars(name)
+
+    ds = ds.assign_coords(
+        y=np.arange(ds.sizes["y"]),
+        x=np.arange(ds.sizes["x"]),
+        lat=(("y", "x"), lat2d),
+        lon=(("y", "x"), lon2d),
+    )
+
+    return ds, True
+
+
+
 def wrapper(ds, user_rename_dict=None):
     ds = ds.copy()
+    ds, saved_lat, saved_lon = _save_1d_latlon(ds)
     ds = rename_time_lev(ds)
     ds = rename_cmip6(ds, rename_dict=renaming_dict_exp(user_rename_dict))
     ds = rename_vertical_metrics(ds)
+    ds, restored_regular_grid = _restore_regular_1d_latlon(ds, saved_lat, saved_lon)
+    #if restored_regular_grid:
+    #    return ds
     ds = promote_empty_dims(ds)
     ds = broadcast_lonlat(ds)
     ds = correct_coordinates(ds)
@@ -206,6 +299,7 @@ def wrapper(ds, user_rename_dict=None):
     ds = corr_xy_points(ds)
     ds = drop_cyclic_points(ds)
     ds = drop_northsouth_duplicate_points(ds)
+
     return ds
 
 def distance(lat1,lon1,lat2,lon2):
@@ -357,6 +451,50 @@ def kart_2_kugel(x,y,z):
         lon2=np.append(lon2,lon)
     return lat,lon2
 
+def make_3d_dz_from_depth(
+    ds,
+    depth_name="depth",
+    lat_name="latitude",
+    lon_name="longitude",
+    varname="thkcello",
+):
+    """
+    Create 3D layer thickness thkcello(depth, latitude, longitude)
+    from a 1D depth coordinate.
 
+    No bathymetry or partial bottom cells are applied.
+    """
+
+    z = ds[depth_name].values.astype(float)
+
+    # Layer interfaces halfway between depth centers
+    zi = np.zeros(len(z) + 1)
+    zi[0] = 0.0
+    zi[1:-1] = 0.5 * (z[:-1] + z[1:])
+    zi[-1] = z[-1] + 0.5 * (z[-1] - z[-2])
+
+    dz = np.diff(zi)
+
+    # Broadcast to 3D
+    dz3d = np.broadcast_to(
+        dz[:, None, None],
+        (len(ds[depth_name]), len(ds[lat_name]), len(ds[lon_name])),
+    )
+
+    thkcello = xa.DataArray(
+        dz3d,
+        dims=(depth_name, lat_name, lon_name),
+        coords={
+            depth_name: ds[depth_name],
+            lat_name: ds[lat_name],
+            lon_name: ds[lon_name],
+        },
+        name=varname,
+    )
+
+    thkcello.attrs["units"] = "m"
+    thkcello.attrs["long_name"] = "layer thickness derived from depth coordinate"
+
+    return thkcello.to_dataset()
 
 

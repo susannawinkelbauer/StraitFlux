@@ -3,6 +3,31 @@ import xarray as xa
 import numpy as np
 import sys
 
+AVAILABLE_SECTIONS = [
+    "Bering",
+    "Fram",
+    "Davis",
+    "Barents",
+    "RAPID",
+    "SAMBA",
+    "OSNAP",
+    "GSR",
+    "Makassar",
+    "Hudson",
+    "Hudson_NW",
+    "Färöer",
+    "Gibraltar",
+    "NIIC",
+    "IF",
+    "FS",
+]
+
+def available_sections():
+    """
+    Print and return all predefined StraitFlux sections.
+    """
+    return AVAILABLE_SECTIONS.copy()
+
 def check_res(Tdataset):
     if np.abs(Tdataset.lon.min()-Tdataset.lon.max()) >= 358:
         res=360/len(Tdataset.x)*0.4
@@ -38,6 +63,9 @@ def def_indices(strait,coords,lon_p,lat_p,set_latlon,res):
     elif strait == 'RAPID':
         lon = np.array(np.arange(-80.5,-13.5,res))
         lat = np.array(np.linspace(26.5,26.5,len(lon)))
+    elif strait == 'SAMBA':
+        lon = np.array(np.arange(-54,20,res))
+        lat = np.array(np.linspace(-34.5,-34.5,len(lon)))
     elif strait == 'OSNAP':
         lon1 = np.array(np.arange(-57,-44.6,res))
         lat1 = np.array(np.linspace(52,60.1888,len(lon1)))

@@ -15,11 +15,10 @@ except ImportError:
     print('skipping dask import')
 
 from xmip.preprocessing import rename_cmip6, promote_empty_dims, broadcast_lonlat, correct_coordinates
-#import preprocessing as prepro
-#import functions as func
+
 import StraitFlux.preprocessing as prepro
 import StraitFlux.functions as func
-#from indices import check_availability_indices, prepare_indices
+from StraitFlux.indices import available_sections as _available_sections
 from StraitFlux.indices import check_availability_indices, prepare_indices
 
 
@@ -1773,6 +1772,189 @@ def watermass_transports(
             path_save
             + strait
             + "_watermass_transports_"
+            + model
+            + "_"
+            + str(time_start)
+            + "-"
+            + str(time_end)
+            + ".nc"
+        )
+
+    return out
+
+def transports_split(
+    product,
+    strait,
+    model,
+    time_start,
+    time_end,
+    file_u,
+    file_v,
+    file_t,
+    file_z,
+    split_by,
+    split_value,
+    file_s="",
+    file_zu=None,
+    file_zv=None,
+    mesh_dxv=0,
+    mesh_dyu=0,
+    coords=0,
+    set_latlon=False,
+    lon_p=0,
+    lat_p=0,
+    Arakawa="",
+    rho=1026.0,
+    cp=3996.0,
+    Tref=0.0,
+    path_save="",
+    path_indices="",
+    path_mesh="",
+    saving=True,
+    user_rename_dict=None,
+    normalize_time="MS",
+    salt_is_SA=False,
+    temp_is_CT=False,
+):
+    """
+    Calculate total transport plus transports above/below a depth
+    or lighter/denser than a density threshold.
+
+    product : {"volume", "heat", "salt"}
+    split_by : {"depth", "density"}
+    split_value :
+        depth in m if split_by="depth";
+        sigma0 threshold if split_by="density", e.g. 27.8 or 1027.8.
+
+    For depth splitting, the model layer closest to split_value is used.
+    No vertical interpolation is performed.
+    """
+
+    if product not in ["volume", "heat", "salt"]:
+        raise ValueError("product must be 'volume', 'heat', or 'salt'.")
+
+    if split_by not in ["depth", "density"]:
+        raise ValueError("split_by must be 'depth' or 'density'.")
+
+    if split_by == "density" and file_s in ["", None]:
+        raise ValueError("Density splitting requires file_s.")
+
+    ov = transports_overturning(
+        strait=strait,
+        model=model,
+        time_start=time_start,
+        time_end=time_end,
+        file_u=file_u,
+        file_v=file_v,
+        file_t=file_t,
+        file_z=file_z,
+        file_s=file_s,
+        file_zu=file_zu,
+        file_zv=file_zv,
+        mesh_dxv=mesh_dxv,
+        mesh_dyu=mesh_dyu,
+        coords=coords,
+        set_latlon=set_latlon,
+        lon_p=lon_p,
+        lat_p=lat_p,
+        Arakawa=Arakawa,
+        rho=rho,
+        cp=cp,
+        Tref=Tref,
+        path_save=path_save,
+        path_indices=path_indices,
+        path_mesh=path_mesh,
+        saving=False,
+        salt_is_SA=salt_is_SA,
+        temp_is_CT=temp_is_CT,
+        return_diagnostics=True,
+        user_rename_dict=user_rename_dict,
+        normalize_time=normalize_time,
+    )
+
+    transport = ov["transport_face_m3s"]
+    temp = ov["temperature_face"]
+
+    if product == "salt":
+        salt = ov["salinity_face"]
+
+    if split_by == "depth":
+        lev = transport["lev"]
+        ilev = int(np.abs(lev - split_value).argmin())
+        actual_split = float(lev.isel(lev=ilev).values)
+
+        mask_upper = lev <= actual_split
+        mask_lower = lev > actual_split
+
+        label_upper = "above_split"
+        label_lower = "below_split"
+
+    else:
+        sigma0 = ov["sigma0_face"]
+
+        split_sigma = split_value
+        if split_sigma > 100:
+            split_sigma = split_sigma - 1000.0
+
+        actual_split = float(split_sigma)
+
+        mask_upper = sigma0 <= split_sigma
+        mask_lower = sigma0 > split_sigma
+
+        label_upper = "lighter_than_split"
+        label_lower = "denser_than_split"
+
+    sum_dims = [d for d in ["lev", "section_element"] if d in transport.dims]
+
+    if product == "volume":
+        factor = 1e-6
+        unit = "Sv"
+        total = transport.sum(dim=sum_dims) * factor
+        upper = transport.where(mask_upper, 0.0).sum(dim=sum_dims) * factor
+        lower = transport.where(mask_lower, 0.0).sum(dim=sum_dims) * factor
+        prefix = "volume_transport"
+
+    elif product == "heat":
+        factor = rho * cp / 1e15
+        unit = "PW"
+        total = (transport * temp).sum(dim=sum_dims) * factor
+        upper = (transport.where(mask_upper, 0.0) * temp).sum(dim=sum_dims) * factor
+        lower = (transport.where(mask_lower, 0.0) * temp).sum(dim=sum_dims) * factor
+        prefix = "heat_transport"
+
+    elif product == "salt":
+        factor = rho
+        unit = "kg s-1"
+        total = (transport * salt).sum(dim=sum_dims) * factor
+        upper = (transport.where(mask_upper, 0.0) * salt).sum(dim=sum_dims) * factor
+        lower = (transport.where(mask_lower, 0.0) * salt).sum(dim=sum_dims) * factor
+        prefix = "salt_transport"
+
+    out = xa.Dataset(
+        {
+            f"{prefix}_total": total.rename(f"{prefix}_total"),
+            f"{prefix}_{label_upper}": upper.rename(f"{prefix}_{label_upper}"),
+            f"{prefix}_{label_lower}": lower.rename(f"{prefix}_{label_lower}"),
+        }
+    )
+
+    for var in out.data_vars:
+        out[var].attrs["units"] = unit
+
+    out.attrs["split_by"] = split_by
+    out.attrs["requested_split_value"] = float(split_value)
+    out.attrs["actual_split_value"] = actual_split
+    out.attrs["method"] = "StraitFlux line integration split by depth or density"
+
+    if saving:
+        out.to_netcdf(
+            path_save
+            + strait
+            + "_"
+            + product
+            + "_split_"
+            + split_by
+            + "_"
             + model
             + "_"
             + str(time_start)
