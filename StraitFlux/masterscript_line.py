@@ -1054,11 +1054,14 @@ def transports_overturning(
 
     # Monthly products can use slightly different timestamps for different variables
     # even when they represent the same month. Normalize them before xarray alignment.
-    t = _normalize_monthly_time(t, normalize_time=normalize_time)
-    u = _normalize_monthly_time(u, normalize_time=normalize_time)
-    v = _normalize_monthly_time(v, normalize_time=normalize_time)
-    if has_salinity:
-        sdata = _normalize_monthly_time(sdata, normalize_time=normalize_time)
+    try:
+        t = _normalize_monthly_time(t, normalize_time=normalize_time)
+        u = _normalize_monthly_time(u, normalize_time=normalize_time)
+        v = _normalize_monthly_time(v, normalize_time=normalize_time)
+        if has_salinity:
+            sdata = _normalize_monthly_time(sdata, normalize_time=normalize_time)
+    except:
+        print('skipping time normalization!!!')
 
     # Vertical metrics can be static mesh fields with dummy time_counter=0,
     # or true time-varying VVL fields. Handle both cases explicitly.
