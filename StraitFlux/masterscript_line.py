@@ -24,12 +24,12 @@ from StraitFlux.indices import check_availability_indices, prepare_indices
 
 
 
-def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,file_z, file_zu=None, file_zv=None,mesh_dxv=0, mesh_dyu=0,coords=0,set_latlon=False,lon_p=0,lat_p=0,file_s='',file_sic='',file_sit='',file_tracer='',tracer_var='tracer',tracer_units='',Arakawa='',rho=1026,cp=3996, Tref=0,path_save='',path_indices='',path_mesh='',saving=True,user_rename_dict=None):
+def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,file_z, file_zu=None, file_zv=None,mesh_dxv=0, mesh_dyu=0,coords=0,set_latlon=False,lon_p=0,lat_p=0,file_s='',file_sic='',file_sit='',file_tracer='',tracer_var='tracer',tracer_units='',Arakawa='',rho=1026,cp=3996, Tref=0, Sref=34.8,path_save='',path_indices='',path_mesh='',saving=True,user_rename_dict=None):
 
     '''Calculation of Transports using line integration
 
     INPUT Parameters:
-    product (str): volume, heat, salt, tracer or ice
+    product (str): volume, heat, salt, freshwater, tracer or ice
     strait (str): desired oceanic strait, either pre-defined from indices file or new
     model (str): desired CMIP6 model or reanalysis
     time_start (str or int): starting year
@@ -40,8 +40,9 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     file_z (str): path + filename(s) of cell thickness field(s); (multiple files possible, use *)
 
     OPTIONAL:
+    file_zu/file_zv (str): Optional U/V-cell thickness file. If omitted, U/V-cell thicknesses are calculated automatically from file_z.
     mesh_dxu/mesh_dyv (array): arrays containing the exact grid cell dimensions at northern and eastern grid cell faces of u and v cells (dxv and dyu); if not supplied will be calculated
-    coords (tuple): coordinates for strait, if not pre-defined: (latitude_start,longitude_start,latitude_end,longitude_end)
+    coords (tuple): coordinates for strait, if not pre-defined: (latitude_start,longitude_start,latitude_end,longitude_end). Sections may be defined in either direction (north→south, south→north, west→east or east→west). Positive transports are defined to the left of the specified section direction.
     set_latlon: set True if you wish to pass arrays of latitudes and longitudes
     lon (array): longitude coordinates for strait, if not pre-defined. (range -180 to 180; same length as lat needed!)
     lat (array): latitude coordinates for strait, if not pre-defined. (range -90 to 90; same length as lon needed!)
@@ -52,13 +53,14 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     tracer_var (str): only needed for tracer transports; variable name of the tracer after preprocessing
     tracer_units (str): optional units of the tracer concentration; output units are tracer_units * m3 s-1
     Arakawa (str): Arakawa-A, Arakawa-B or Arakawa-C; only needed if automatic check fails
-    rho (int or array): default = 1026 kg/m3
-    cp (int or array): default = 3996 J/(kgK)
-    Tref (int or array): default = 0°C
+    rho (float): default = 1026 kg/m3
+    cp (float): default = 3996 J/(kgK)
+    Tref (float): default = 0°C
+    Sref (float): reference salinity for freshwater transports; default = 34.8
     path_save (str): path to save transport data
     path_indices (str): path to save indices data
     path_mesh (str): path to save mesh data
-
+    user_rename_dict (dict): Optional dictionary containing additional variable renaming rules used during preprocessing.
 
     RETURNS:
     volume, heat, salt, tracer or ice transports through specified strait for specified model
@@ -215,7 +217,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
             sit=sit.expand_dims(dim={"time": 1})
             sic=sic.expand_dims(dim={"time": 1})
 
-    if product in ['volume','heat','salt','tracer']:
+    if product in ['volume','heat','salt','freshwater','tracer']:
         deltaz_ds = xa.open_mfdataset(file_z, preprocess=partial_func,chunks={'time':1})
         deltaz = _get_vertical_thickness_dataset(deltaz_ds, ['thkcello'], label='T-cell thickness')
         if 'time' in deltaz.dims:
@@ -239,7 +241,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         if product in ['volume','heat','salt','tracer']:
             deltaz=deltaz.load()
 
-    if product in ['volume','heat','salt','tracer']:
+    if product in ['volume','heat','salt','freshwater','tracer']:
         # Check if file_zu and file_zv are provided
         if file_zu and file_zv:
             try:
@@ -276,9 +278,10 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     vdata = v.vo
     Tdata = t
 
-    if product == 'salt':
-        Sdata = xa.open_mfdataset(file_s, preprocess=partial_func,chunks={'time':1}).sel(time=slice(str(time_start),str(time_end)))
-
+    if product in ['salt', 'freshwater']:
+        if file_s in ['', None]:
+            raise ValueError(f"product='{product}' requires file_s to be supplied.")
+        Sdata = xa.open_mfdataset(file_s, preprocess=partial_func, chunks={'time': 1}).sel(time=slice(str(time_start), str(time_end)))
     if product == 'tracer':
         if file_tracer in ['', None]:
             raise ValueError("product='tracer' requires file_tracer to be supplied.")
@@ -294,7 +297,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
             )
 
 
-    if product in ['volume','heat','salt','tracer']:
+    if product in ['volume','heat','salt','freshwater','tracer']:
         udata,vdata2,dzu3,dzv3,mu2,mv2 = func.transform_Arakawa(grid,mu,mv,deltaz,dzu3,dzv3,udata,vdata)
 
 
@@ -303,7 +306,6 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         udata=udata*mu2.dyu.values*dzu3.values
         print('calc v')
         vdata=vdata*mv2.dxv.values*dzv3.values
-
 
     if product == 'heat':
         print('rolling T')
@@ -314,8 +316,6 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         print('calc v')
         vdata=vdata*mv2.dxv.values*dzv3.values*(Tvdata.values-Tref)
 
-
-
     if product == 'salt':
         print('rolling S')
         Sudata = func.interp_TS(Sdata.so,'x')
@@ -325,6 +325,15 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
         print('calc v')
         vdata=vdata*mv2.dxv.values*dzv3.values*Svdata.values
 
+    if product == 'freshwater':
+        print('rolling S')
+        Sudata = func.interp_TS(Sdata.so, 'x')
+        Svdata = func.interp_TS(Sdata.so, 'y')
+        print('calc u')
+        udata = (udata*mu2.dyu.values*dzu3.values*((Sref-Sudata.values)/Sref))
+        print('calc v')
+        vdata = (vdata*mv2.dxv.values*dzv3.values*((Sref-Svdata.values)/Sref))
+    
     if product == 'tracer':
         print('rolling tracer')
         Cudata = func.interp_TS(Cfield,'x')
@@ -390,11 +399,6 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     trans.to_netcdf(path_save+strait+'_'+product+'_'+model+'_'+str(time_start)+'-'+str(time_end)+'.nc')
 
     return trans
-
-
-
-
-
 
 
 
