@@ -232,13 +232,13 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
             t=t.load()
             u=u.load()
             v=v.load()
-            if product in ['volume','heat','salt','tracer']:
+            if product in ['volume','heat','salt','tracer','freshwater']:
                 deltaz=deltaz.load()
     except NameError:
         t=t.load()
         u=u.load()
         v=v.load()
-        if product in ['volume','heat','salt','tracer']:
+        if product in ['volume','heat','salt','tracer','freshwater']:
             deltaz=deltaz.load()
 
     if product in ['volume','heat','salt','freshwater','tracer']:
@@ -354,7 +354,7 @@ def transports(product,strait,model,time_start,time_end,file_u,file_v,file_t,fil
     udata = udata.fillna(0.)
     vdata = vdata.fillna(0.)
     print('calc line')
-    if product in ['volume','heat','salt','tracer']:
+    if product in ['volume','heat','salt','tracer', 'freshwater']:
         udata = udata.sum(dim='lev')
         vdata = vdata.sum(dim='lev')
     datau = xa.Dataset({'inte':(('time','y','x'),udata.data)},coords=({'time':('time',udata.time.data),'x':('x',udata.x.data),'y':('y',udata.y.data)}))
