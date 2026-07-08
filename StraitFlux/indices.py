@@ -41,13 +41,18 @@ def def_indices(strait,coords,lon_p,lat_p,set_latlon,res):
     if set_latlon == True:
         lon = lon_p
         lat = lat_p
-    elif coords!=0:
+    elif coords != 0:
         if np.abs(coords[2]-coords[0]) <= np.abs(coords[3]-coords[1]):
-            lon = np.array(np.arange(coords[1],coords[3],res))
-            lat = np.array(np.linspace(coords[0],coords[2],len(lon)))
+            # predominantly zonal section
+            lon_step = res if coords[3] >= coords[1] else -res
+            lon = np.array(np.arange(coords[1],coords[3],lon_step))
+            lat = np.array(np.linspace(coords[0], coords[2], len(lon)))
         else:
-            lat = np.array(np.arange(coords[0],coords[2],res))
-            lon = np.array(np.linspace(coords[1],coords[3],len(lat)))
+            # predominantly meridional section
+            lat_step = res if coords[2] >= coords[0] else -res
+            lat = np.array(np.arange(coords[0], coords[2], lat_step))
+            lon = np.array(np.linspace(coords[1], coords[3], len(lat)))
+
     elif strait == 'Bering':
         lon = np.array(np.arange(-170.5,-166,res))
         lat = np.array(np.linspace(65.99,65.75,len(lon)))
