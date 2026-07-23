@@ -527,6 +527,584 @@ def _get_vertical_thickness_dataset(obj, candidates, label="vertical thickness")
     return da.to_dataset(name="thkcello")
 
 
+def _integrate_overturning_streamfunction(
+    layer_transport,
+    dim,
+    direction,
+):
+    """
+    Cumulatively integrate layer/bin transports in a physically defined direction.
+
+    Parameters
+    ----------
+    layer_transport : xarray.DataArray
+        Transport in individual depth layers or density bins.
+
+    dim : str
+        Integration dimension, e.g. ``"lev"`` or ``"density_bin"``.
+
+    direction : str
+        For depth coordinates:
+            - ``"top_down"``
+            - ``"bottom_up"``
+
+        For density coordinates:
+            - ``"light_to_dense"``
+            - ``"dense_to_light"``
+
+    Returns
+    -------
+    xarray.DataArray
+        Cumulative overturning streamfunction, returned in the original
+        coordinate order.
+    """
+
+    if dim not in layer_transport.dims:
+        raise ValueError(
+            f"Dimension '{dim}' is not present in layer_transport. "
+            f"Available dimensions are {layer_transport.dims}."
+        )
+
+    valid_directions = {
+        "lev": {"top_down", "bottom_up"},
+        "density_bin": {"light_to_dense", "dense_to_light"},
+    }
+
+    if dim not in valid_directions:
+        raise ValueError(
+            f"No integration-direction definitions are available for dim='{dim}'."
+        )
+
+    if direction not in valid_directions[dim]:
+        allowed = sorted(valid_directions[dim])
+        raise ValueError(
+            f"Invalid direction '{direction}' for dim='{dim}'. "
+            f"Choose one of {allowed}."
+        )
+
+    coord = layer_transport[dim]
+
+    if coord.size < 2:
+        return layer_transport.cumsum(dim=dim)
+
+    first = float(coord.isel({dim: 0}).values)
+    last = float(coord.isel({dim: -1}).values)
+    coordinate_increases = last > first
+
+    if dim == "lev":
+        # Depth normally increases downward:
+        # shallow -> deep means increasing coordinate.
+        desired_increasing = direction == "top_down"
+
+    else:
+        # Density normally increases from light -> dense.
+        desired_increasing = direction == "light_to_dense"
+
+    if coordinate_increases == desired_increasing:
+        streamfunction = layer_transport.cumsum(dim=dim)
+    else:
+        streamfunction = (
+            layer_transport
+            .isel({dim: slice(None, None, -1)})
+            .cumsum(dim=dim)
+            .isel({dim: slice(None, None, -1)})
+        )
+
+    return streamfunction 
+
+def _normalize_meridional_products(products, has_salinity):
+    """Validate and normalize requested native-row transport diagnostics."""
+
+    if products is None:
+        requested = ["volume", "heat", "MOC_depth"]
+        if has_salinity:
+            requested.extend(["salt", "MOC_density"])
+    elif isinstance(products, str):
+        requested = [products]
+    else:
+        requested = list(products)
+
+    aliases = {
+        "volume": "volume",
+        "heat": "heat",
+        "salt": "salt",
+        "moc_depth": "MOC_depth",
+        "depth_moc": "MOC_depth",
+        "moc_density": "MOC_density",
+        "density_moc": "MOC_density",
+    }
+
+    normalized = []
+    for product in requested:
+        key = str(product).strip().lower()
+        if key not in aliases:
+            raise ValueError(
+                f"Unknown product '{product}'. Choose from "
+                "'volume', 'heat', 'salt', 'MOC_depth', and 'MOC_density'."
+            )
+        canonical = aliases[key]
+        if canonical not in normalized:
+            normalized.append(canonical)
+
+    if not normalized:
+        raise ValueError("products must contain at least one diagnostic.")
+
+    salinity_products = {"salt", "MOC_density"}
+    missing_salinity = salinity_products.intersection(normalized) and not has_salinity
+    if missing_salinity:
+        raise ValueError(
+            "Products 'salt' and 'MOC_density' require file_s to be supplied."
+        )
+
+    return tuple(normalized)
+
+
+def meridional_transports(
+    model,
+    time_start,
+    time_end,
+    file_v,
+    file_t,
+    file_z,
+    file_s="",
+    file_zv=None,
+    mesh_dxv=0,
+    basin_mask=None,
+    basin_vars=None,
+    basin_mask_grid="T",
+    Arakawa="",
+    rho=1026.0,
+    cp=3996.0,
+    Tref=0.0,
+    path_save="",
+    path_mesh="",
+    saving=True,
+    user_rename_dict=None,
+    cyclic_columns=0,
+    products=None,
+    depth_integration_direction="top_down",
+    density_integration_direction="light_to_dense",
+    sigmin=23.0,
+    sigstp=0.02,
+    nbins=270,
+    salt_is_SA=False,
+    temp_is_CT=False,
+):
+    """Calculate transports along every native V-grid row.
+
+    This intentionally simple implementation assumes that ``v``, ``T``,
+    ``e3v`` and ``e1v`` are already supplied on the same complete native grid.
+    It performs no grid transformation, mesh calculation, spatial subsetting,
+    automatic cyclic-point detection, or coordinate-based horizontal alignment.
+
+    The calculation is exactly
+
+    ``v * tracer_at_v * e3v * e1v``
+
+    followed by summation over ``depth`` and ``x``.  Exactly the final
+    ``cyclic_columns`` columns are removed once from every horizontal field.
+    """
+
+    has_salinity = file_s not in (None, "")
+    products = _normalize_meridional_products(products, has_salinity)
+    need_heat = "heat" in products
+    need_salt = "salt" in products
+    need_depth_moc = "MOC_depth" in products
+    need_density_moc = "MOC_density" in products
+    need_temperature = need_heat or need_density_moc
+    need_salinity = need_salt or need_density_moc
+
+    print("requested products:", ", ".join(products))
+    print("read native-grid fields without StraitFlux preprocessing")
+
+    # Only rename dimensions/coordinates/variables to a common convention.
+    rename_common = {
+        "time_counter": "time",
+        "time_counter_bnds": "time_bnds",
+        "deptht": "depth",
+        "depthu": "depth",
+        "depthv": "depth",
+        "depthw": "depth",
+        "lev": "depth",
+        "z": "depth",
+        "nav_lon": "lon",
+        "nav_lat": "lat",
+    }
+    if user_rename_dict:
+        rename_common.update(user_rename_dict)
+
+    def _rename_existing(obj):
+        available = set(obj.dims) | set(obj.coords)
+        if isinstance(obj, xa.Dataset):
+            available |= set(obj.data_vars)
+        mapping = {
+            old: new for old, new in rename_common.items()
+            if old in available and old != new
+        }
+        return obj.rename(mapping) if mapping else obj
+
+    def _first_variable(ds, candidates, label):
+        if isinstance(ds, xa.DataArray):
+            return ds
+        for name in candidates:
+            if name in ds:
+                return ds[name]
+        if len(ds.data_vars) == 1:
+            return ds[list(ds.data_vars)[0]]
+        raise KeyError(
+            f"Could not identify {label}. Tried {candidates}; "
+            f"available variables are {list(ds.data_vars)}."
+        )
+
+    vds = _rename_existing(xa.open_mfdataset(file_v, chunks="auto"))
+    tds = _rename_existing(xa.open_mfdataset(file_t, chunks="auto"))
+    ztds = _rename_existing(xa.open_mfdataset(file_z, chunks="auto"))
+
+    v = _first_variable(vds, ["vo", "vomecrty", "v"], "V velocity")
+    temp = _first_variable(tds, ["thetao", "votemper", "temperature", "temp"], "temperature")
+    e3t = _first_variable(
+        ztds,
+        ["thkcello", "e3t", "e3t_0", "e3t_0_field"],
+        "T-cell thickness",
+    )
+
+    # Select requested period only when a real time coordinate is present.
+    for name in ["v", "temp", "e3t"]:
+        obj = locals()[name]
+        if "time" in obj.dims and obj.sizes["time"] > 1:
+            locals()[name] = obj.sel(time=slice(str(time_start), str(time_end)))
+    v = v.sel(time=slice(str(time_start), str(time_end))) if "time" in v.dims and v.sizes["time"] > 1 else v
+    temp = temp.sel(time=slice(str(time_start), str(time_end))) if "time" in temp.dims and temp.sizes["time"] > 1 else temp
+    e3t = e3t.sel(time=slice(str(time_start), str(time_end))) if "time" in e3t.dims and e3t.sizes["time"] > 1 else e3t
+
+    if "time" not in v.dims:
+        v = v.expand_dims(time=temp.time if "time" in temp.dims else [0])
+    if "time" not in temp.dims:
+        temp = temp.expand_dims(time=v.time)
+
+    # Static metrics may contain a dummy singleton time dimension.
+    if "time" in e3t.dims and e3t.sizes["time"] == 1 and v.sizes["time"] != 1:
+        e3t = e3t.isel(time=0, drop=True)
+
+    if file_zv not in (None, ""):
+        zvds = _rename_existing(xa.open_mfdataset(file_zv, chunks="auto"))
+        e3v = _first_variable(
+            zvds,
+            ["thkcello_v", "thkcello", "e3v", "e3v_0", "e3v_0_field"],
+            "V-face thickness",
+        )
+        if "time" in e3v.dims and e3v.sizes["time"] > 1:
+            e3v = e3v.sel(time=slice(str(time_start), str(time_end)))
+        if "time" in e3v.dims and e3v.sizes["time"] == 1 and v.sizes["time"] != 1:
+            e3v = e3v.isel(time=0, drop=True)
+    else:
+        print("file_zv not supplied: calculate e3v as the T-cell mean in y")
+        e3v = func.interp_TS(e3t, "y")
+
+    if not isinstance(mesh_dxv, (xa.Dataset, xa.DataArray)):
+        raise ValueError(
+            "This simple meridional function requires mesh_dxv/e1v to be "
+            "supplied explicitly as an xarray DataArray or Dataset."
+        )
+    e1v = _rename_existing(mesh_dxv)
+    e1v = _first_variable(e1v, ["dxv", "e1v"], "e1v/dxv")
+
+    # Remove harmless singleton dimensions from static e1v.
+    for dim in list(e1v.dims):
+        if dim not in ("y", "x") and e1v.sizes[dim] == 1:
+            e1v = e1v.isel({dim: 0}, drop=True)
+
+    salt = None
+    if need_salinity:
+        sds = _rename_existing(xa.open_mfdataset(file_s, chunks="auto"))
+        salt = _first_variable(sds, ["so", "vosaline", "salinity", "salt"], "salinity")
+        if "time" in salt.dims and salt.sizes["time"] > 1:
+            salt = salt.sel(time=slice(str(time_start), str(time_end)))
+        if "time" not in salt.dims:
+            salt = salt.expand_dims(time=v.time)
+
+    # All arrays are required to describe the same native grid by position.
+    fields = {"temperature": temp, "e3v": e3v, "e1v": e1v}
+    if salt is not None:
+        fields["salinity"] = salt
+    for name, da in fields.items():
+        for dim in ("y", "x"):
+            if dim not in da.dims:
+                raise ValueError(f"{name} has dimensions {da.dims}; '{dim}' is required.")
+            if da.sizes[dim] != v.sizes[dim]:
+                raise ValueError(
+                    f"{name} has {dim}={da.sizes[dim]}, while V velocity has "
+                    f"{dim}={v.sizes[dim]}. Supply all fields on the same full native grid."
+                )
+    for name, da in {"v": v, "temperature": temp, "e3v": e3v}.items():
+        if "depth" not in da.dims:
+            raise ValueError(f"{name} has dimensions {da.dims}; 'depth' is required.")
+        if da.sizes["depth"] != v.sizes["depth"]:
+            raise ValueError(
+                f"{name} has depth={da.sizes['depth']}, while V velocity has "
+                f"depth={v.sizes['depth']}."
+            )
+
+    # Discard horizontal/depth index labels and align strictly by array position.
+    # Time labels are retained.
+    native_x = np.arange(v.sizes["x"])
+    native_y = np.arange(v.sizes["y"])
+    native_depth = v["depth"].values
+    v = v.assign_coords(x=native_x, y=native_y, depth=native_depth)
+    temp = temp.assign_coords(x=native_x, y=native_y, depth=native_depth)
+    e3v = e3v.assign_coords(x=native_x, y=native_y, depth=native_depth)
+    e1v = e1v.assign_coords(x=native_x, y=native_y)
+    if salt is not None:
+        salt = salt.assign_coords(x=native_x, y=native_y, depth=native_depth)
+
+    # Interpolate T/S to V exactly as in the manual calculation.
+    temp_v = func.interp_TS(temp, "y") if need_temperature else None
+    salt_v = func.interp_TS(salt, "y") if need_salinity else None
+
+    if cyclic_columns in (None, False):
+        cyclic_columns = 0
+    if not isinstance(cyclic_columns, (int, np.integer)) or cyclic_columns < 0:
+        raise ValueError("cyclic_columns must be a non-negative integer.")
+    cyclic_columns = int(cyclic_columns)
+    if cyclic_columns >= v.sizes["x"]:
+        raise ValueError("cyclic_columns cannot remove all x points.")
+
+    # Drop exactly the user-supplied number of final columns, once.
+    if cyclic_columns > 0:
+        xslice = slice(None, -cyclic_columns)
+        v = v.isel(x=xslice)
+        e3v = e3v.isel(x=xslice)
+        e1v = e1v.isel(x=xslice)
+        if temp_v is not None:
+            temp_v = temp_v.isel(x=xslice)
+        if salt_v is not None:
+            salt_v = salt_v.isel(x=xslice)
+        print(f"dropped exactly the final {cyclic_columns} x columns")
+    else:
+        print("no cyclic columns dropped")
+
+    print("final native-grid sizes:", dict(v.sizes))
+
+    # This is the direct manual calculation: v * e3v * e1v.
+    area_v = e3v * e1v
+    volume_face = (v * area_v).fillna(0.0)
+
+    # Optional masks. Keep this deliberately positional and simple.
+    mask_arrays = [xa.ones_like(e1v, dtype=float)]
+    basin_names = ["global"]
+    if basin_mask is not None:
+        if isinstance(basin_mask, str):
+            masks_ds = _rename_existing(xa.open_dataset(basin_mask))
+        else:
+            masks_ds = _rename_existing(basin_mask)
+
+        if isinstance(masks_ds, xa.DataArray):
+            mask_items = [(masks_ds.name or "basin", masks_ds)]
+        elif isinstance(basin_vars, dict):
+            mask_items = [(name, masks_ds[var]) for name, var in basin_vars.items()]
+        elif basin_vars is not None:
+            names = [basin_vars] if isinstance(basin_vars, str) else list(basin_vars)
+            mask_items = [(name, masks_ds[name]) for name in names]
+        else:
+            mask_items = [(name, masks_ds[name]) for name in masks_ds.data_vars]
+
+        for name, mask in mask_items:
+            for dim in list(mask.dims):
+                if dim not in ("y", "x") and mask.sizes[dim] == 1:
+                    mask = mask.isel({dim: 0}, drop=True)
+            if mask.sizes.get("y") != v.sizes["y"] or mask.sizes.get("x") not in (
+                v.sizes["x"], v.sizes["x"] + cyclic_columns
+            ):
+                raise ValueError(f"Basin mask '{name}' does not match the native grid.")
+            mask = mask.assign_coords(
+                y=np.arange(mask.sizes["y"]), x=np.arange(mask.sizes["x"])
+            )
+            if cyclic_columns > 0 and mask.sizes["x"] != v.sizes["x"]:
+                mask = mask.isel(x=slice(None, -cyclic_columns))
+            if str(basin_mask_grid).upper() == "T":
+                mask = (mask > 0) & ((mask.shift(y=-1) > 0))
+            else:
+                mask = mask > 0
+            mask_arrays.append(mask.astype(float))
+            basin_names.append(str(name))
+
+    masks = xa.concat(mask_arrays, dim=xa.IndexVariable("basin", basin_names))
+    volume_basin = volume_face.expand_dims(basin=masks.basin) * masks
+
+    out_vars = {}
+    if "volume" in products:
+        out_vars["volume_transport_Sv"] = (
+            volume_basin.sum(dim=("depth", "x")) / 1e6
+        )
+
+    if need_heat:
+        out_vars["heat_transport_PW"] = (
+            rho * cp * (volume_basin * (temp_v - Tref)).sum(dim=("depth", "x")) / 1e15
+        )
+
+    if need_salt:
+        out_vars["salt_transport_kg_s"] = (
+            rho * (volume_basin * salt_v).sum(dim=("depth", "x"))
+        )
+
+    if need_depth_moc:
+        layer = (volume_basin.sum(dim="x") / 1e6).rename(
+            {"depth": "depth"}
+        )
+        if depth_integration_direction == "top_down":
+            psi = layer.cumsum("depth")
+        elif depth_integration_direction == "bottom_up":
+            psi = layer.isel(depth=slice(None, None, -1)).cumsum("depth").isel(
+                depth=slice(None, None, -1)
+            )
+        else:
+            raise ValueError(
+                "depth_integration_direction must be 'top_down' or 'bottom_up'."
+            )
+        out_vars["overturning_depth_layer_Sv"] = layer
+        out_vars["overturning_depth_streamfunction_Sv"] = psi
+        out_vars["MOC_depth_Sv"] = psi.max("depth")
+        out_vars["MOC_depth_min_Sv"] = psi.min("depth")
+
+    if need_density_moc:
+        try:
+            import gsw
+        except ImportError as exc:
+            raise ImportError("Density-space MOC requires gsw.") from exc
+
+        # Use actual depth values when numeric; otherwise fall back to level index.
+        depth_values = v["depth"].astype(float)
+        lat = vds["lat"] if "lat" in vds else xa.zeros_like(e1v)
+        lon = vds["lon"] if "lon" in vds else xa.zeros_like(e1v)
+        for coord_name, coord in [("lat", lat), ("lon", lon)]:
+            if "time" in coord.dims:
+                coord = coord.isel(time=0, drop=True)
+            coord = coord.assign_coords(x=np.arange(coord.sizes["x"]), y=np.arange(coord.sizes["y"]))
+            if cyclic_columns > 0:
+                coord = coord.isel(x=slice(None, -cyclic_columns))
+            if coord_name == "lat":
+                lat = coord
+            else:
+                lon = coord
+
+        depth3, lat3 = xa.broadcast(depth_values, lat)
+        pressure = xa.apply_ufunc(
+            gsw.p_from_z, -depth3, lat3,
+            vectorize=True, dask="parallelized", output_dtypes=[float]
+        ).broadcast_like(v)
+        SA = salt_v if salt_is_SA else xa.apply_ufunc(
+            gsw.SA_from_SP, salt_v, pressure,
+            lon.broadcast_like(v), lat.broadcast_like(v),
+            vectorize=True, dask="parallelized", output_dtypes=[float]
+        )
+        CT = temp_v if temp_is_CT else xa.apply_ufunc(
+            gsw.CT_from_t, SA, temp_v, pressure,
+            vectorize=True, dask="parallelized", output_dtypes=[float]
+        )
+        sigma0 = xa.apply_ufunc(
+            gsw.sigma0, SA, CT,
+            vectorize=True, dask="parallelized", output_dtypes=[float]
+        )
+
+        centers = sigmin + sigstp * (np.arange(nbins) + 0.5)
+        vol_np = np.asarray(volume_basin.transpose("time", "basin", "depth", "y", "x"))
+        sig_np = np.asarray(sigma0.transpose("time", "depth", "y", "x"))
+        nt, nbasin, _, ny, _ = vol_np.shape
+        binned = np.zeros((nt, nbasin, nbins, ny), dtype=float)
+        for it in range(nt):
+            for iy in range(ny):
+                sigrow = sig_np[it, :, iy, :].ravel()
+                bins = np.floor((sigrow - sigmin) / sigstp).astype("int64")
+                valid = np.isfinite(sigrow) & (bins >= 0) & (bins < nbins)
+                for ib in range(nbasin):
+                    vals = vol_np[it, ib, :, iy, :].ravel()
+                    good = valid & np.isfinite(vals)
+                    if np.any(good):
+                        binned[it, ib, :, iy] = np.bincount(
+                            bins[good], weights=vals[good], minlength=nbins
+                        )[:nbins]
+
+        layer_density = xa.DataArray(
+            binned / 1e6,
+            dims=("time", "basin", "density_bin", "y"),
+            coords={
+                "time": v.time,
+                "basin": masks.basin,
+                "density_bin": centers,
+                "y": v.y,
+            },
+        )
+        if density_integration_direction == "light_to_dense":
+            psi_density = layer_density.cumsum("density_bin")
+        elif density_integration_direction == "dense_to_light":
+            psi_density = layer_density.isel(
+                density_bin=slice(None, None, -1)
+            ).cumsum("density_bin").isel(density_bin=slice(None, None, -1))
+        else:
+            raise ValueError(
+                "density_integration_direction must be 'light_to_dense' or 'dense_to_light'."
+            )
+        out_vars["overturning_density_bin_Sv"] = layer_density
+        out_vars["overturning_density_streamfunction_Sv"] = psi_density
+        out_vars["MOC_density_Sv"] = psi_density.max("density_bin")
+        out_vars["MOC_density_min_Sv"] = psi_density.min("density_bin")
+
+    out = xa.Dataset(out_vars)
+
+    # Row-latitude information, when available.
+    if "lat" in vds:
+        lat = vds["lat"]
+        if "time" in lat.dims:
+            lat = lat.isel(time=0, drop=True)
+        lat = lat.assign_coords(x=np.arange(lat.sizes["x"]), y=np.arange(lat.sizes["y"]))
+        if cyclic_columns > 0:
+            lat = lat.isel(x=slice(None, -cyclic_columns))
+        out = out.assign_coords(
+            latitude=("y", lat.mean("x", skipna=True).values),
+            latitude_min=("y", lat.min("x", skipna=True).values),
+            latitude_max=("y", lat.max("x", skipna=True).values),
+        )
+
+    units = {
+        "volume_transport_Sv": "Sv",
+        "heat_transport_PW": "PW",
+        "salt_transport_kg_s": "kg s-1",
+        "overturning_depth_layer_Sv": "Sv",
+        "overturning_depth_streamfunction_Sv": "Sv",
+        "MOC_depth_Sv": "Sv",
+        "MOC_depth_min_Sv": "Sv",
+        "overturning_density_bin_Sv": "Sv",
+        "overturning_density_streamfunction_Sv": "Sv",
+        "MOC_density_Sv": "Sv",
+        "MOC_density_min_Sv": "Sv",
+    }
+    for name, unit in units.items():
+        if name in out:
+            out[name].attrs["units"] = unit
+
+    out.attrs.update(
+        method="Direct native V-grid row integration",
+        formula="v * e3v * e1v, with optional T/S at V points",
+        cyclic_columns_dropped=cyclic_columns,
+        requested_products=", ".join(products),
+        rho_kg_m3=float(rho),
+        cp_J_kgK=float(cp),
+        reference_temperature_C=float(Tref),
+        depth_integration_direction=depth_integration_direction,
+        density_integration_direction=density_integration_direction,
+    )
+    out = out.load()
+
+    if saving:
+        filename = (
+            path_save + "meridional_transports_" + model + "_"
+            + str(time_start) + "-" + str(time_end) + ".nc"
+        )
+        out.to_netcdf(filename)
+
+    return out
+
+
 def _overturning_core(
     strait,
     model,
@@ -550,6 +1128,8 @@ def _overturning_core(
     Tref=0.0,
     apply_barotropic_correction=False,
     transport_target_m3s=None,
+    depth_integration_direction="top_down",
+    density_integration_direction="light_to_dense",
     sigmin=23.0,
     sigstp=0.02,
     nbins=270,
@@ -709,7 +1289,11 @@ def _overturning_core(
 
     overturning_depth_layer_Sv = (V_depth / 1e6).rename("overturning_depth_layer_Sv")
     overturning_depth_streamfunction_Sv = (
-        overturning_depth_layer_Sv.cumsum(dim="lev")
+        _integrate_overturning_streamfunction(
+            overturning_depth_layer_Sv,
+            dim="lev",
+            direction=depth_integration_direction,
+        )
     ).rename("overturning_depth_streamfunction_Sv")
     MOC_depth_Sv = overturning_depth_streamfunction_Sv.max(dim="lev").rename("MOC_depth_Sv")
 
@@ -823,7 +1407,11 @@ def _overturning_core(
 
         overturning_density_bin_Sv = (V_density / 1e6).rename("overturning_density_bin_Sv")
         overturning_density_streamfunction_Sv = (
-            overturning_density_bin_Sv.cumsum(dim="density_bin")
+            _integrate_overturning_streamfunction(
+                overturning_density_bin_Sv,
+                dim="density_bin",
+                direction=density_integration_direction,
+            )
         ).rename("overturning_density_streamfunction_Sv")
         MOC_density_Sv = overturning_density_streamfunction_Sv.max(dim="density_bin").rename("MOC_density_Sv")
 
@@ -911,6 +1499,8 @@ def _overturning_core(
         out.attrs["section_lon_for_gsw"] = section_lon
         out.attrs["section_lat_for_gsw"] = section_lat
     out.attrs["method"] = "StraitFlux zig-zag line indices with extended overturning diagnostics"
+    out.attrs["depth_integration_direction"] = depth_integration_direction
+    out.attrs["density_integration_direction"] = density_integration_direction
 
     if saving:
         suffix = "_adjusted" if apply_barotropic_correction else ""
@@ -959,6 +1549,8 @@ def transports_overturning(
     saving=True,
     apply_barotropic_correction=False,
     transport_target_m3s=None,
+    depth_integration_direction="top_down",
+    density_integration_direction="light_to_dense",
     sigmin=23.0,
     sigstp=0.02,
     nbins=270,
@@ -1035,14 +1627,14 @@ def transports_overturning(
     )
 
     print("read t, u, v and optional s fields")
-    t = xa.open_mfdataset(file_t, preprocess=partial_func2, chunks={"time": 1})
-    u = xa.open_mfdataset(file_u, preprocess=partial_func2, chunks={"time": 1})
-    v = xa.open_mfdataset(file_v, preprocess=partial_func2, chunks={"time": 1})
-    deltaz_ds = xa.open_mfdataset(file_z, preprocess=partial_func2, chunks={"time": 1})
+    t = xa.open_mfdataset(file_t, preprocess=partial_func2, chunks="auto")
+    u = xa.open_mfdataset(file_u, preprocess=partial_func2, chunks="auto")
+    v = xa.open_mfdataset(file_v, preprocess=partial_func2, chunks="auto")
+    deltaz_ds = xa.open_mfdataset(file_z, preprocess=partial_func2, chunks="auto")
     deltaz = _get_vertical_thickness_dataset(deltaz_ds, ["thkcello"], label="T-cell thickness")
 
     has_salinity = file_s not in ["", None]
-    sdata = xa.open_mfdataset(file_s, preprocess=partial_func2, chunks={"time": 1}) if has_salinity else None
+    sdata = xa.open_mfdataset(file_s, preprocess=partial_func2, chunks="auto") if has_salinity else None
 
     t = func._select_time_if_present(t, time_start, time_end)
     u = func._select_time_if_present(u, time_start, time_end)
@@ -1086,8 +1678,8 @@ def transports_overturning(
 
     if file_zu and file_zv:
         try:
-            dzu_ds = xa.open_mfdataset(file_zu, preprocess=partial_func2, chunks={"time": 1})
-            dzv_ds = xa.open_mfdataset(file_zv, preprocess=partial_func2, chunks={"time": 1})
+            dzu_ds = xa.open_mfdataset(file_zu, preprocess=partial_func2, chunks="auto")
+            dzv_ds = xa.open_mfdataset(file_zv, preprocess=partial_func2, chunks="auto")
             dzu3 = _get_vertical_thickness_var(dzu_ds, ["thkcello_u", "thkcello"], label="U-face thickness")
             dzv3 = _get_vertical_thickness_var(dzv_ds, ["thkcello_v", "thkcello"], label="V-face thickness")
             dzu3 = _prepare_vertical_metric_time(
@@ -1142,6 +1734,8 @@ def transports_overturning(
         Tref=Tref,
         apply_barotropic_correction=apply_barotropic_correction,
         transport_target_m3s=transport_target_m3s,
+        depth_integration_direction=depth_integration_direction,
+        density_integration_direction=density_integration_direction,
         sigmin=sigmin,
         sigstp=sigstp,
         nbins=nbins,
@@ -1182,6 +1776,8 @@ def transports_overturning_ds(
     saving=True,
     apply_barotropic_correction=False,
     transport_target_m3s=None,
+    depth_integration_direction="top_down",
+    density_integration_direction="light_to_dense",
     sigmin=23.0,
     sigstp=0.02,
     nbins=270,
@@ -1349,6 +1945,8 @@ def transports_overturning_ds(
         Tref=Tref,
         apply_barotropic_correction=apply_barotropic_correction,
         transport_target_m3s=transport_target_m3s,
+        depth_integration_direction=depth_integration_direction,
+        density_integration_direction=density_integration_direction,
         sigmin=sigmin,
         sigstp=sigstp,
         nbins=nbins,
@@ -1971,3 +2569,620 @@ def transports_split(
         )
 
     return out
+
+def meridional_transports_at_latitudes(
+    model,
+    time_start,
+    time_end,
+    target_latitudes,
+    file_u,
+    file_v,
+    file_t,
+    file_z,
+    file_s="",
+    file_zu=None,
+    file_zv=None,
+    mesh_dxv=0,
+    mesh_dyu=0,
+    basin_mask=None,
+    basin_vars=None,
+    rho=1026.0,
+    cp=3996.0,
+    Tref=0.0,
+    path_save="",
+    saving=True,
+    user_rename_dict=None,
+    cyclic_columns=0,
+    products=None,
+    depth_integration_direction="top_down",
+):
+    """Calculate transports across exact geographic latitude contours.
+
+    A latitude contour is represented as the boundary between T cells south
+    and north of ``target_latitudes``. On a curvilinear Arakawa-C grid this
+    boundary crosses both V faces and U faces. The transport is therefore
+    calculated conservatively from
+
+    ``v * e1v * e3v * crossing_v + u * e2u * e3u * crossing_u``.
+
+    Positive transport is northward. The routine deliberately performs only
+    simple variable/dimension renaming and positional grid matching. Exactly
+    ``cyclic_columns`` final x columns are removed once, after interpolation
+    and construction of the crossing masks.
+
+    Parameters
+    ----------
+    target_latitudes : scalar or 1-D sequence
+        Geographic latitude(s) in degrees north.
+    mesh_dxv : xarray.DataArray or Dataset
+        Native V-face zonal width, usually ``e1v``.
+    mesh_dyu : xarray.DataArray or Dataset
+        Native U-face meridional width, usually ``e2u``.
+    basin_mask : optional DataArray, Dataset, or path
+        Two-dimensional T-grid mask(s), with 1/True inside and 0/False outside.
+        A face is included only when both adjacent T cells belong to the basin.
+    products : sequence of str, optional
+        Any of ``volume``, ``heat``, ``salt``, and ``MOC_depth``.
+    """
+
+    has_salinity = file_s not in (None, "")
+    if products is None:
+        products = ["volume", "heat", "MOC_depth"]
+        if has_salinity:
+            products.append("salt")
+    elif isinstance(products, str):
+        products = [products]
+    else:
+        products = list(products)
+
+    aliases = {
+        "volume": "volume",
+        "heat": "heat",
+        "salt": "salt",
+        "moc_depth": "MOC_depth",
+        "depth_moc": "MOC_depth",
+    }
+    normalized = []
+    for product in products:
+        key = str(product).strip().lower()
+        if key not in aliases:
+            raise ValueError(
+                f"Unknown product '{product}'. Choose from volume, heat, "
+                "salt, and MOC_depth."
+            )
+        canonical = aliases[key]
+        if canonical not in normalized:
+            normalized.append(canonical)
+    products = tuple(normalized)
+
+    if "salt" in products and not has_salinity:
+        raise ValueError("Product 'salt' requires file_s.")
+
+    need_temp = "heat" in products
+    need_salt = "salt" in products
+
+    target_latitudes = np.atleast_1d(np.asarray(target_latitudes, dtype=float))
+    if target_latitudes.ndim != 1 or target_latitudes.size == 0:
+        raise ValueError("target_latitudes must be a scalar or a non-empty 1-D sequence.")
+
+    print("requested products:", ", ".join(products))
+    print("calculate transports across exact geographic latitude contours")
+
+    rename_common = {
+        "time_counter": "time",
+        "time_counter_bnds": "time_bnds",
+        "deptht": "depth",
+        "depthu": "depth",
+        "depthv": "depth",
+        "depthw": "depth",
+        "lev": "depth",
+        "z": "depth",
+        "nav_lon": "lon",
+        "nav_lat": "lat",
+    }
+    if user_rename_dict:
+        rename_common.update(user_rename_dict)
+
+    def _rename_existing(obj):
+        available = set(obj.dims) | set(obj.coords)
+        if isinstance(obj, xa.Dataset):
+            available |= set(obj.data_vars)
+        mapping = {
+            old: new for old, new in rename_common.items()
+            if old in available and old != new
+        }
+        return obj.rename(mapping) if mapping else obj
+
+    def _open(obj):
+        if isinstance(obj, (xa.Dataset, xa.DataArray)):
+            return _rename_existing(obj)
+        return _rename_existing(xa.open_mfdataset(obj, chunks="auto"))
+
+    def _first_variable(obj, candidates, label):
+        if isinstance(obj, xa.DataArray):
+            return obj
+        for name in candidates:
+            if name in obj:
+                return obj[name]
+        if len(obj.data_vars) == 1:
+            return obj[list(obj.data_vars)[0]]
+        raise KeyError(
+            f"Could not identify {label}. Tried {candidates}; available "
+            f"variables are {list(obj.data_vars)}."
+        )
+
+    def _select_time(da):
+        if "time" in da.dims and da.sizes["time"] > 1:
+            return da.sel(time=slice(str(time_start), str(time_end)))
+        return da
+
+    def _drop_static_singletons(da, keep=("depth", "y", "x")):
+        for dim in list(da.dims):
+            if dim not in keep and da.sizes[dim] == 1:
+                da = da.isel({dim: 0}, drop=True)
+        return da
+
+    uds = _open(file_u)
+    vds = _open(file_v)
+    tds = _open(file_t)
+    ztds = _open(file_z)
+
+    u = _select_time(_first_variable(uds, ["uo", "vozocrtx", "u"], "U velocity"))
+    v = _select_time(_first_variable(vds, ["vo", "vomecrty", "v"], "V velocity"))
+    temp = _select_time(_first_variable(
+        tds, ["thetao", "votemper", "temperature", "temp"], "temperature"
+    ))
+    e3t = _select_time(_first_variable(
+        ztds, ["thkcello", "e3t", "e3t_0", "e3t_0_field"], "T-cell thickness"
+    ))
+
+    if "lat" not in tds:
+        raise ValueError(
+            "The temperature/T-grid file must contain nav_lat or lat on the T grid."
+        )
+    lat_t = tds["lat"]
+    if "time" in lat_t.dims:
+        lat_t = lat_t.isel(time=0, drop=True)
+    lat_t = _drop_static_singletons(lat_t, keep=("y", "x"))
+
+    if file_zu not in (None, ""):
+        e3u = _select_time(_first_variable(
+            _open(file_zu),
+            ["thkcello_u", "thkcello", "e3u", "e3u_0", "e3u_0_field"],
+            "U-face thickness",
+        ))
+    else:
+        print("file_zu not supplied: calculate e3u as the T-cell mean in x")
+        e3u = func.interp_TS(e3t, "x")
+
+    if file_zv not in (None, ""):
+        e3v = _select_time(_first_variable(
+            _open(file_zv),
+            ["thkcello_v", "thkcello", "e3v", "e3v_0", "e3v_0_field"],
+            "V-face thickness",
+        ))
+    else:
+        print("file_zv not supplied: calculate e3v as the T-cell mean in y")
+        e3v = func.interp_TS(e3t, "y")
+
+    if not isinstance(mesh_dxv, (xa.Dataset, xa.DataArray)):
+        raise ValueError("mesh_dxv must explicitly contain native e1v/dxv.")
+    if not isinstance(mesh_dyu, (xa.Dataset, xa.DataArray)):
+        raise ValueError("mesh_dyu must explicitly contain native e2u/dyu.")
+
+    e1v = _first_variable(_rename_existing(mesh_dxv), ["e1v", "dxv"], "e1v/dxv")
+    e2u = _first_variable(_rename_existing(mesh_dyu), ["e2u", "dyu"], "e2u/dyu")
+    e1v = _drop_static_singletons(e1v, keep=("y", "x"))
+    e2u = _drop_static_singletons(e2u, keep=("y", "x"))
+
+    salt = None
+    if need_salt:
+        salt = _select_time(_first_variable(
+            _open(file_s), ["so", "vosaline", "salinity", "salt"], "salinity"
+        ))
+
+    # Ensure a time dimension exists for all time-varying fields.
+    reference_time = None
+    for da in (u, v, temp, salt):
+        if da is not None and "time" in da.dims:
+            reference_time = da["time"]
+            break
+    if reference_time is None:
+        reference_time = xa.IndexVariable("time", [0])
+    for name in ("u", "v", "temp", "salt"):
+        da = locals()[name]
+        if da is not None and "time" not in da.dims:
+            locals()[name] = da.expand_dims(time=reference_time)
+    # locals() assignment is not reliable in all Python implementations.
+    if "time" not in u.dims:
+        u = u.expand_dims(time=reference_time)
+    if "time" not in v.dims:
+        v = v.expand_dims(time=reference_time)
+    if "time" not in temp.dims:
+        temp = temp.expand_dims(time=reference_time)
+    if salt is not None and "time" not in salt.dims:
+        salt = salt.expand_dims(time=reference_time)
+
+    # Static thickness fields may carry a singleton time dimension.
+    for name in ("e3u", "e3v"):
+        da = locals()[name]
+        if "time" in da.dims and da.sizes["time"] == 1 and u.sizes["time"] != 1:
+            da = da.isel(time=0, drop=True)
+        if name == "e3u":
+            e3u = da
+        else:
+            e3v = da
+
+    # All native fields must have identical positional horizontal/depth sizes.
+    horizontal = {
+        "U velocity": u,
+        "V velocity": v,
+        "temperature": temp,
+        "e3u": e3u,
+        "e3v": e3v,
+        "e1v": e1v,
+        "e2u": e2u,
+        "T-grid latitude": lat_t,
+    }
+    if salt is not None:
+        horizontal["salinity"] = salt
+    for label, da in horizontal.items():
+        for dim in ("y", "x"):
+            if dim not in da.dims:
+                raise ValueError(f"{label} has dimensions {da.dims}; '{dim}' is required.")
+            if da.sizes[dim] != u.sizes[dim]:
+                raise ValueError(
+                    f"{label} has {dim}={da.sizes[dim]}, while U velocity has "
+                    f"{dim}={u.sizes[dim]}. Supply fields on the same full native grid."
+                )
+    for label, da in {
+        "U velocity": u, "V velocity": v, "temperature": temp,
+        "e3u": e3u, "e3v": e3v,
+    }.items():
+        if "depth" not in da.dims:
+            raise ValueError(f"{label} has dimensions {da.dims}; 'depth' is required.")
+        if da.sizes["depth"] != u.sizes["depth"]:
+            raise ValueError(
+                f"{label} has depth={da.sizes['depth']}, while U velocity has "
+                f"depth={u.sizes['depth']}."
+            )
+
+    # Discard index labels and match strictly by native array position.
+    nx, ny, nz = u.sizes["x"], u.sizes["y"], u.sizes["depth"]
+    xcoord = np.arange(nx)
+    ycoord = np.arange(ny)
+    depthcoord = u["depth"].values
+    for name in ("u", "v", "temp", "e3u", "e3v", "salt"):
+        da = locals()[name]
+        if da is None:
+            continue
+        coords = {"x": xcoord, "y": ycoord}
+        if "depth" in da.dims:
+            coords["depth"] = depthcoord
+        da = da.assign_coords(coords)
+        if name == "u": u = da
+        elif name == "v": v = da
+        elif name == "temp": temp = da
+        elif name == "e3u": e3u = da
+        elif name == "e3v": e3v = da
+        elif name == "salt": salt = da
+    e1v = e1v.assign_coords(x=xcoord, y=ycoord)
+    e2u = e2u.assign_coords(x=xcoord, y=ycoord)
+    lat_t = lat_t.assign_coords(x=xcoord, y=ycoord)
+
+    # Interpolate tracers before cyclic columns are removed.
+    temp_u = func.interp_TS(temp, "x") if need_temp else None
+    temp_v = func.interp_TS(temp, "y") if need_temp else None
+    salt_u = func.interp_TS(salt, "x") if need_salt else None
+    salt_v = func.interp_TS(salt, "y") if need_salt else None
+
+    # Remove exactly the requested trailing cyclic columns once.  Tracer
+    # interpolation was done on the complete native grid so that its behaviour
+    # remains identical to the existing meridional-row routine.
+    if cyclic_columns in (None, False):
+        cyclic_columns = 0
+    if not isinstance(cyclic_columns, (int, np.integer)) or cyclic_columns < 0:
+        raise ValueError("cyclic_columns must be a non-negative integer.")
+    cyclic_columns = int(cyclic_columns)
+    if cyclic_columns >= nx:
+        raise ValueError("cyclic_columns cannot remove all x points.")
+
+    if cyclic_columns > 0:
+        xslice = slice(None, -cyclic_columns)
+        u = u.isel(x=xslice)
+        v = v.isel(x=xslice)
+        e3u = e3u.isel(x=xslice)
+        e3v = e3v.isel(x=xslice)
+        e1v = e1v.isel(x=xslice)
+        e2u = e2u.isel(x=xslice)
+        lat_t_work = lat_t.isel(x=xslice)
+        if temp_u is not None:
+            temp_u = temp_u.isel(x=xslice)
+            temp_v = temp_v.isel(x=xslice)
+        if salt_u is not None:
+            salt_u = salt_u.isel(x=xslice)
+            salt_v = salt_v.isel(x=xslice)
+        print(f"dropped exactly the final {cyclic_columns} x columns")
+    else:
+        lat_t_work = lat_t
+        print("no cyclic columns dropped")
+
+    nx_work = u.sizes["x"]
+    ny_work = u.sizes["y"]
+
+    # Basin masks are supplied on T points.  A native face is retained only
+    # when both adjacent T cells lie inside the basin.  For U faces, x is
+    # periodic after the duplicate cyclic columns have been removed.
+    basin_names = ["global"]
+    basin_masks_t = [np.ones((ny_work, nx_work), dtype=bool)]
+
+    if basin_mask is not None:
+        masks_obj = (
+            _open(basin_mask)
+            if isinstance(basin_mask, str)
+            else _rename_existing(basin_mask)
+        )
+        if isinstance(masks_obj, xa.DataArray):
+            mask_items = [(masks_obj.name or "basin", masks_obj)]
+        elif isinstance(basin_vars, dict):
+            mask_items = [(name, masks_obj[var]) for name, var in basin_vars.items()]
+        elif basin_vars is not None:
+            names = [basin_vars] if isinstance(basin_vars, str) else list(basin_vars)
+            mask_items = [(name, masks_obj[name]) for name in names]
+        else:
+            mask_items = [(name, masks_obj[name]) for name in masks_obj.data_vars]
+
+        for name, mask in mask_items:
+            mask = _drop_static_singletons(mask, keep=("y", "x"))
+            if mask.sizes.get("y") != ny or mask.sizes.get("x") != nx:
+                raise ValueError(
+                    f"Basin mask '{name}' must have the full native size "
+                    f"(y={ny}, x={nx}); got {dict(mask.sizes)}."
+                )
+            mask = mask.assign_coords(x=xcoord, y=ycoord)
+            if cyclic_columns > 0:
+                mask = mask.isel(x=slice(None, -cyclic_columns))
+            basin_names.append(str(name))
+            basin_masks_t.append(np.asarray((mask > 0).values, dtype=bool))
+
+    basin_face_masks_u = []
+    basin_face_masks_v = []
+    for mask_t_np in basin_masks_t:
+        # U face between (y,x) and (y,x+1), including the periodic seam.
+        mask_u_np = mask_t_np & np.roll(mask_t_np, -1, axis=1)
+        # V face between (y,x) and (y+1,x).  There is no artificial external
+        # boundary at the northern or southern edge.
+        mask_v_np = np.zeros_like(mask_t_np, dtype=bool)
+        mask_v_np[:-1, :] = mask_t_np[:-1, :] & mask_t_np[1:, :]
+        basin_face_masks_u.append(mask_u_np)
+        basin_face_masks_v.append(mask_v_np)
+
+    # Build each exact latitude contour only once from the static T-grid
+    # latitude field.  We store only the crossed native faces and their signs,
+    # rather than constructing a huge (latitude,y,x) mask that is repeatedly
+    # broadcast over time and depth.
+    lat_np = np.asarray(lat_t_work.values)
+    contours = []
+    n_u_faces = []
+    n_v_faces = []
+    closure_errors = []
+
+    for latitude in target_latitudes:
+        north = lat_np >= latitude
+
+        # Signed boundary of the north-of-latitude T-cell set.
+        # Each native face can occur at most once in a contour.
+        cross_u_np = np.roll(north, -1, axis=1).astype(np.int8) - north.astype(np.int8)
+        cross_v_np = np.zeros_like(north, dtype=np.int8)
+        cross_v_np[:-1, :] = (
+            north[1:, :].astype(np.int8) - north[:-1, :].astype(np.int8)
+        )
+
+        yu, xu = np.nonzero(cross_u_np)
+        yv, xv = np.nonzero(cross_v_np)
+        su = cross_u_np[yu, xu].astype(float)
+        sv = cross_v_np[yv, xv].astype(float)
+
+        # A closed discrete contour has zero net signed crossings in each
+        # horizontal direction.  This is a useful topology check and catches
+        # contours that touch an unhandled domain edge.
+        closure_error = int(abs(su.sum()) + abs(sv.sum()))
+        closure_errors.append(closure_error)
+        n_u_faces.append(len(su))
+        n_v_faces.append(len(sv))
+        contours.append((yu, xu, su, yv, xv, sv))
+
+    if any(err != 0 for err in closure_errors):
+        bad = [
+            f"{lat:g}° (error={err})"
+            for lat, err in zip(target_latitudes, closure_errors)
+            if err != 0
+        ]
+        print(
+            "warning: some latitude contours may touch an unhandled grid "
+            "boundary: " + ", ".join(bad[:10])
+        )
+
+    volume_u = (u * e2u * e3u).fillna(0.0)
+    volume_v = (v * e1v * e3v).fillna(0.0)
+
+    def _sum_sparse_faces(field_u, field_v, basin_index, contour):
+        """Sum one 3-D face flux field along one sparse closed contour."""
+        yu, xu, su, yv, xv, sv = contour
+        pieces = []
+
+        if len(su):
+            keep_u = basin_face_masks_u[basin_index][yu, xu]
+            if np.any(keep_u):
+                yu_keep = yu[keep_u]
+                xu_keep = xu[keep_u]
+                su_keep = su[keep_u]
+                index_u = xa.DataArray(np.arange(len(yu_keep)), dims="face")
+                selected_u = field_u.isel(
+                    y=xa.DataArray(yu_keep, dims="face", coords={"face": index_u}),
+                    x=xa.DataArray(xu_keep, dims="face", coords={"face": index_u}),
+                )
+                sign_u = xa.DataArray(su_keep, dims="face", coords={"face": index_u})
+                pieces.append((selected_u * sign_u).sum("face"))
+
+        if len(sv):
+            keep_v = basin_face_masks_v[basin_index][yv, xv]
+            if np.any(keep_v):
+                yv_keep = yv[keep_v]
+                xv_keep = xv[keep_v]
+                sv_keep = sv[keep_v]
+                index_v = xa.DataArray(np.arange(len(yv_keep)), dims="face")
+                selected_v = field_v.isel(
+                    y=xa.DataArray(yv_keep, dims="face", coords={"face": index_v}),
+                    x=xa.DataArray(xv_keep, dims="face", coords={"face": index_v}),
+                )
+                sign_v = xa.DataArray(sv_keep, dims="face", coords={"face": index_v})
+                pieces.append((selected_v * sign_v).sum("face"))
+
+        if not pieces:
+            template = field_u.isel(y=0, x=0, drop=True) * 0.0
+            return template
+        result = pieces[0]
+        for piece in pieces[1:]:
+            result = result + piece
+        return result
+
+    # Compute only the crossed faces for each latitude and basin.  The loop is
+    # inexpensive because a contour contains O(nx) faces rather than ny*nx.
+    layer_volume_by_basin = []
+    for basin_index, basin_name in enumerate(basin_names):
+        layer_volume_by_lat = [
+            _sum_sparse_faces(volume_u, volume_v, basin_index, contour)
+            for contour in contours
+        ]
+        layer_volume_by_basin.append(
+            xa.concat(
+                layer_volume_by_lat,
+                dim=xa.IndexVariable("latitude", target_latitudes),
+            )
+        )
+    layer_volume = xa.concat(
+        layer_volume_by_basin,
+        dim=xa.IndexVariable("basin", basin_names),
+    )
+
+    out_vars = {}
+    if "volume" in products:
+        out_vars["volume_transport_Sv"] = layer_volume.sum("depth") / 1e6
+
+    if need_temp:
+        heat_face_u = rho * cp * volume_u * (temp_u - Tref)
+        heat_face_v = rho * cp * volume_v * (temp_v - Tref)
+        heat_by_basin = []
+        for basin_index, basin_name in enumerate(basin_names):
+            heat_by_lat = [
+                _sum_sparse_faces(heat_face_u, heat_face_v, basin_index, contour)
+                for contour in contours
+            ]
+            heat_by_basin.append(
+                xa.concat(
+                    heat_by_lat,
+                    dim=xa.IndexVariable("latitude", target_latitudes),
+                )
+            )
+        heat_layer = xa.concat(
+            heat_by_basin,
+            dim=xa.IndexVariable("basin", basin_names),
+        )
+        out_vars["heat_transport_PW"] = heat_layer.sum("depth") / 1e15
+
+    if need_salt:
+        salt_face_u = rho * volume_u * salt_u
+        salt_face_v = rho * volume_v * salt_v
+        salt_by_basin = []
+        for basin_index, basin_name in enumerate(basin_names):
+            salt_by_lat = [
+                _sum_sparse_faces(salt_face_u, salt_face_v, basin_index, contour)
+                for contour in contours
+            ]
+            salt_by_basin.append(
+                xa.concat(
+                    salt_by_lat,
+                    dim=xa.IndexVariable("latitude", target_latitudes),
+                )
+            )
+        salt_layer = xa.concat(
+            salt_by_basin,
+            dim=xa.IndexVariable("basin", basin_names),
+        )
+        out_vars["salt_transport_kg_s"] = salt_layer.sum("depth")
+
+    if "MOC_depth" in products:
+        layer_sv = layer_volume / 1e6
+        if depth_integration_direction == "top_down":
+            psi = layer_sv.cumsum("depth")
+        elif depth_integration_direction == "bottom_up":
+            psi = layer_sv.isel(depth=slice(None, None, -1)).cumsum("depth").isel(
+                depth=slice(None, None, -1)
+            )
+        else:
+            raise ValueError(
+                "depth_integration_direction must be 'top_down' or 'bottom_up'."
+            )
+        out_vars["overturning_depth_layer_Sv"] = layer_sv
+        out_vars["overturning_depth_streamfunction_Sv"] = psi
+        out_vars["MOC_depth_Sv"] = psi.max("depth")
+        out_vars["MOC_depth_min_Sv"] = psi.min("depth")
+
+    out = xa.Dataset(out_vars)
+    out = out.assign_coords(latitude=("latitude", target_latitudes))
+
+    units = {
+        "volume_transport_Sv": "Sv",
+        "heat_transport_PW": "PW",
+        "salt_transport_kg_s": "kg s-1",
+        "overturning_depth_layer_Sv": "Sv",
+        "overturning_depth_streamfunction_Sv": "Sv",
+        "MOC_depth_Sv": "Sv",
+        "MOC_depth_min_Sv": "Sv",
+    }
+    for name, unit in units.items():
+        if name in out:
+            out[name].attrs["units"] = unit
+
+    out.attrs.update({
+        "model": str(model),
+        "method": "sparse exact geographic latitude contour on native Arakawa-C faces",
+        "positive_direction": "northward",
+        "cyclic_columns_dropped": cyclic_columns,
+        "rho_kg_m3": float(rho),
+        "cp_J_kg_K": float(cp),
+        "reference_temperature_degC": float(Tref),
+    })
+
+    # Diagnostics: every listed face is unique within its contour.  The closure
+    # error should be zero for a fully closed latitude contour.
+    out["number_of_U_faces"] = xa.DataArray(
+        np.asarray(n_u_faces, dtype=np.int64), dims="latitude",
+        coords={"latitude": target_latitudes},
+    )
+    out["number_of_V_faces"] = xa.DataArray(
+        np.asarray(n_v_faces, dtype=np.int64), dims="latitude",
+        coords={"latitude": target_latitudes},
+    )
+    out["contour_closure_error"] = xa.DataArray(
+        np.asarray(closure_errors, dtype=np.int64), dims="latitude",
+        coords={"latitude": target_latitudes},
+    )
+    out["number_of_U_faces"].attrs["description"] = "unique native U faces crossed by latitude contour"
+    out["number_of_V_faces"].attrs["description"] = "unique native V faces crossed by latitude contour"
+    out["contour_closure_error"].attrs["description"] = (
+        "sum of absolute signed U- and V-face crossings; zero indicates a closed contour"
+    )
+    out = out.load()
+
+    if saving:
+        filename = (
+            path_save + "meridional_exact_latitudes_" + str(model) + "_"
+            + str(time_start) + "-" + str(time_end) + ".nc"
+        )
+        out.to_netcdf(filename)
+        print("saved", filename)
+
+    return out
+    
